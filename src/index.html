@@ -649,6 +649,10 @@ function connect() {
       streamTtsTime = msg.tts_time;
       const meta = messagesDiv.querySelector('.msg.assistant:last-child .meta');
       if (meta) meta.textContent += ` · TTS ${msg.tts_time}s`;
+      if (msg.skipped || streamSources.length === 0) {
+        setState('listening');
+        setStatus('connected', 'Connected');
+      }
     }
   };
 }

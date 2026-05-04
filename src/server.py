@@ -4,7 +4,6 @@ import asyncio
 import base64
 import json
 import os
-import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 import model_config
+import response_utils
 import tts
 
 MODEL_PATH = model_config.resolve_model_path()
@@ -25,10 +25,7 @@ SYSTEM_PROMPT = (
     "请按以下两步执行：\n"
     "1. 首先，逐字转述用户说的话\n"
     "2. 然后，写出你的回答\n\n"
-    "注意：后续交流请全程使用中文。"
 )
-
-SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+')
 
 engine = None
 tts_backend = None
@@ -56,12 +53,6 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
-
-
-def split_sentences(text: str) -> list[str]:
-    """Split text into sentences for streaming TTS."""
-    parts = SENTENCE_SPLIT_RE.split(text.strip())
-    return [s.strip() for s in parts if s.strip()]
 
 
 @app.get("/")
@@ -144,14 +135,18 @@ async def websocket_endpoint(ws: WebSocket):
             llm_time = time.time() - t0
 
             # Extract response from tool call or fallback to raw text
+            used_tool = bool(tool_result)
             if tool_result:
-                strip = lambda s: s.replace('<|"|>', "").strip()
-                transcription = strip(tool_result.get("transcription", ""))
-                text_response = strip(tool_result.get("response", ""))
+                transcription = (
+                    (tool_result.get("transcription", "") or "")
+                    .replace(response_utils.MODEL_DELIMITER, "")
+                    .strip()
+                )
+                text_response = response_utils.normalize_response_text(tool_result.get("response", ""))
                 print(f"LLM ({llm_time:.2f}s) [tool] heard: {transcription!r} → {text_response}")
             else:
                 transcription = None
-                text_response = response["content"][0]["text"]
+                text_response = response_utils.extract_raw_response_text(response)
                 print(f"LLM ({llm_time:.2f}s) [no tool]: {text_response}")
 
             if interrupted.is_set():
@@ -167,10 +162,17 @@ async def websocket_endpoint(ws: WebSocket):
                 print("Interrupted before TTS, skipping audio")
                 continue
 
+            if not response_utils.should_stream_tts(used_tool=used_tool, text=text_response):
+                print("Skipping TTS for non-tool or empty response")
+                await ws.send_text(json.dumps({
+                    "type": "audio_end",
+                    "tts_time": 0,
+                    "skipped": True,
+                }))
+                continue
+
             # Streaming TTS: split into sentences and send chunks progressively
-            sentences = split_sentences(text_response)
-            if not sentences:
-                sentences = [text_response]
+            sentences = response_utils.sentences_for_tts(text_response)
 
             tts_start = time.time()
 
