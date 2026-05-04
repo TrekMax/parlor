@@ -12,6 +12,7 @@ wheels/
 *.onnx
 *.bin
 *.litertlm
+*.xnnpack_cache
 
 # macOS
 .DS_Store

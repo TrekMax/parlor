@@ -15,27 +15,17 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
+import model_config
 import tts
 
-HF_REPO = "litert-community/gemma-4-E2B-it-litert-lm"
-HF_FILENAME = "gemma-4-E2B-it.litertlm"
-
-
-def resolve_model_path() -> str:
-    path = os.environ.get("MODEL_PATH", "")
-    if path:
-        return path
-    from huggingface_hub import hf_hub_download
-    print(f"Downloading {HF_REPO}/{HF_FILENAME} (first run only)...")
-    return hf_hub_download(repo_id=HF_REPO, filename=HF_FILENAME)
-
-
-MODEL_PATH = resolve_model_path()
+MODEL_PATH = model_config.resolve_model_path()
 SYSTEM_PROMPT = (
-    "You are a friendly, conversational AI assistant. The user is talking to you "
-    "through a microphone and showing you their camera. "
-    "You MUST always use the respond_to_user tool to reply. "
-    "First transcribe exactly what the user said, then write your response."
+    "你是一个友好、善于交谈的AI助手。用户正在通过麦克风与你对话，并且正在用摄像头给你展示画面。\n\n"
+    "你**必须始终使用 respond_to_user 工具**来回复用户。\n\n"
+    "请按以下两步执行：\n"
+    "1. 首先，逐字转述用户说的话\n"
+    "2. 然后，写出你的回答\n\n"
+    "注意：后续交流请全程使用中文。"
 )
 
 SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?])\s+')
@@ -46,7 +36,7 @@ tts_backend = None
 
 def load_models():
     global engine, tts_backend
-    print(f"Loading Gemma 4 E2B from {MODEL_PATH}...")
+    print(f"Loading Gemma model from {MODEL_PATH}...")
     engine = litert_lm.Engine(
         MODEL_PATH,
         backend=litert_lm.Backend.GPU,
