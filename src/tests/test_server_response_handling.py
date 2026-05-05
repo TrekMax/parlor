@@ -30,6 +30,16 @@ class ResponseHandlingTests(unittest.TestCase):
     def test_streams_tts_for_tool_response(self):
         self.assertTrue(response_utils.should_stream_tts(used_tool=True, text="Hello there."))
 
+    def test_detects_litert_tool_parse_errors(self):
+        error = RuntimeError("INVALID_ARGUMENT: Failed to parse tool calls from response")
+
+        self.assertTrue(response_utils.is_litert_tool_parse_error(error))
+
+    def test_ignores_unrelated_errors_as_tool_parse_errors(self):
+        error = RuntimeError("network write failed")
+
+        self.assertFalse(response_utils.is_litert_tool_parse_error(error))
+
 
 if __name__ == "__main__":
     unittest.main()

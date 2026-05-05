@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Parlor</title>
+<title>Echo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
@@ -418,9 +418,9 @@
 <header>
   <div class="logo">
     <div class="logo-mark"></div>
-    <h1>Parlor</h1>
+    <h1>Echo</h1>
   </div>
-  <span class="model-label">Gemma 4 E2B</span>
+  <span class="model-label">COMING SOON</span>
   <div id="status" class="status-pill disconnected">Disconnected</div>
 </header>
 
@@ -475,6 +475,10 @@ let streamSampleRate = 24000;
 let streamNextTime = 0;         // When to schedule next chunk
 let streamSources = [];         // Active AudioBufferSourceNodes
 let streamTtsTime = null;
+let assistantAudioActive = false;
+let suppressCurrentSpeech = false;
+let ignoreSpeechUntil = 0;
+const ASSISTANT_AUDIO_COOLDOWN_MS = 1200;
 
 // ── Waveform Visualizer ──
 let analyser, micSource;
@@ -659,6 +663,10 @@ function connect() {
 
 function setStatus(cls, text) { statusEl.className = `status-pill ${cls}`; statusEl.textContent = text; }
 
+function suppressSpeechFor(ms) {
+  ignoreSpeechUntil = Math.max(ignoreSpeechUntil, Date.now() + ms);
+}
+
 // ── Camera ──
 async function startCamera() {
   try {
@@ -690,27 +698,19 @@ function captureFrame() {
 }
 
 // ── VAD Handlers ──
-let speakingStartedAt = 0;
-const BARGE_IN_GRACE_MS = 800; // Ignore VAD triggers shortly after TTS starts (echo)
-
 function handleSpeechStart() {
-  if (state === 'speaking') {
-    // Ignore echo: don't allow barge-in right after TTS starts playing
-    if (Date.now() - speakingStartedAt < BARGE_IN_GRACE_MS) {
-      console.log('Barge-in suppressed (echo grace period)');
-      return;
-    }
-    stopPlayback();
-    ignoreIncomingAudio = true;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'interrupt' }));
-    }
-    setState('listening');
-    console.log('Barge-in: interrupted playback');
+  if (assistantAudioActive || state === 'speaking' || Date.now() < ignoreSpeechUntil) {
+    suppressCurrentSpeech = true;
+    console.log('Speech suppressed during assistant audio');
   }
 }
 
 function handleSpeechEnd(audio) {
+  if (suppressCurrentSpeech || Date.now() < ignoreSpeechUntil) {
+    suppressCurrentSpeech = false;
+    console.log('Suppressed assistant audio echo');
+    return;
+  }
   if (state !== 'listening') return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -752,6 +752,8 @@ function stopPlayback() {
   streamSources = [];
   currentSource = null;
   streamNextTime = 0;
+  assistantAudioActive = false;
+  suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
 }
 
 function ensureAudioCtx() {
@@ -768,7 +770,8 @@ function startStreamPlayback() {
   ensureAudioCtx();
   if (audioCtx.state === 'suspended') audioCtx.resume();
   streamNextTime = audioCtx.currentTime + 0.05; // Small initial buffer
-  speakingStartedAt = Date.now();
+  assistantAudioActive = true;
+  suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
   setState('speaking');
 }
 
@@ -807,6 +810,8 @@ function queueAudioChunk(base64Pcm) {
     // If this was the last chunk and no more are queued, return to listening
     if (streamSources.length === 0 && state === 'speaking') {
       currentSource = null;
+      assistantAudioActive = false;
+      suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
       setState('listening');
       setStatus('connected', 'Connected');
     }

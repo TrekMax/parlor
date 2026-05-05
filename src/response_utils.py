@@ -35,3 +35,12 @@ def sentences_for_tts(text: str) -> list[str]:
 def should_stream_tts(used_tool: bool, text: str) -> bool:
     """Only synthesize speech for valid assistant responses produced through the tool."""
     return used_tool and bool(sentences_for_tts(text))
+
+
+def is_litert_tool_parse_error(error: Exception) -> bool:
+    """Return true when LiteRT failed to parse a malformed model tool call."""
+    message = str(error)
+    return (
+        "Failed to parse tool calls from response" in message
+        or "Failed to parse FC tool calls" in message
+    )

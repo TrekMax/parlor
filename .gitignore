@@ -9,6 +9,12 @@ wheels/
 
 
 # Models (too large for git)
+models/**
+!models/
+!models/.gitkeep
+ref_audio/**
+!ref_audio/
+!ref_audio/.gitkeep
 *.onnx
 *.bin
 *.litertlm

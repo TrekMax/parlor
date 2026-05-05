@@ -1,7 +1,6 @@
 """Parlor — on-device, real-time multimodal AI (voice + vision)."""
 
 import asyncio
-import base64
 import json
 import os
 import time
@@ -9,7 +8,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import litert_lm
-import numpy as np
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -17,10 +15,11 @@ from fastapi.responses import HTMLResponse
 import model_config
 import response_utils
 import tts
+import tts_stream
 
 MODEL_PATH = model_config.resolve_model_path()
 SYSTEM_PROMPT = (
-    "你是一个友好、善于交谈的AI助手。用户正在通过麦克风与你对话，并且正在用摄像头给你展示画面。\n\n"
+    "你是一个友好、善于交谈的AI助手。用户正在通过麦克风与你对话（用户可能会多种语言穿插对话），并且正在用摄像头给你展示画面。\n\n"
     "你**必须始终使用 respond_to_user 工具**来回复用户。\n\n"
     "请按以下两步执行：\n"
     "1. 首先，逐字转述用户说的话\n"
@@ -78,10 +77,13 @@ async def websocket_endpoint(ws: WebSocket):
         tool_result["response"] = response
         return "OK"
 
-    conversation = engine.create_conversation(
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}],
-        tools=[respond_to_user],
-    )
+    def create_conversation():
+        return engine.create_conversation(
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}],
+            tools=[respond_to_user],
+        )
+
+    conversation = create_conversation()
     conversation.__enter__()
 
     interrupted = asyncio.Event()
@@ -129,9 +131,29 @@ async def websocket_endpoint(ws: WebSocket):
             # LLM inference
             t0 = time.time()
             tool_result.clear()
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: conversation.send_message({"role": "user", "content": content})
-            )
+            try:
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: conversation.send_message({"role": "user", "content": content})
+                )
+            except RuntimeError as e:
+                llm_time = time.time() - t0
+                if not response_utils.is_litert_tool_parse_error(e):
+                    raise
+                print(f"LLM ({llm_time:.2f}s) tool parse error; resetting conversation: {e}")
+                conversation.__exit__(None, None, None)
+                conversation = create_conversation()
+                conversation.__enter__()
+                await ws.send_text(json.dumps({
+                    "type": "text",
+                    "text": response_utils.FALLBACK_RESPONSE,
+                    "llm_time": round(llm_time, 2),
+                }))
+                await ws.send_text(json.dumps({
+                    "type": "audio_end",
+                    "tts_time": 0,
+                    "skipped": True,
+                }))
+                continue
             llm_time = time.time() - t0
 
             # Extract response from tool call or fallback to raw text
@@ -174,44 +196,7 @@ async def websocket_endpoint(ws: WebSocket):
             # Streaming TTS: split into sentences and send chunks progressively
             sentences = response_utils.sentences_for_tts(text_response)
 
-            tts_start = time.time()
-
-            # Signal start of audio stream
-            await ws.send_text(json.dumps({
-                "type": "audio_start",
-                "sample_rate": tts_backend.sample_rate,
-                "sentence_count": len(sentences),
-            }))
-
-            for i, sentence in enumerate(sentences):
-                if interrupted.is_set():
-                    print(f"Interrupted during TTS (sentence {i+1}/{len(sentences)})")
-                    break
-
-                # Generate audio for this sentence
-                pcm = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda s=sentence: tts_backend.generate(s)
-                )
-
-                if interrupted.is_set():
-                    break
-
-                # Convert to 16-bit PCM and send as base64
-                pcm_int16 = (pcm * 32767).clip(-32768, 32767).astype(np.int16)
-                await ws.send_text(json.dumps({
-                    "type": "audio_chunk",
-                    "audio": base64.b64encode(pcm_int16.tobytes()).decode(),
-                    "index": i,
-                }))
-
-            tts_time = time.time() - tts_start
-            print(f"TTS ({tts_time:.2f}s): {len(sentences)} sentences")
-
-            if not interrupted.is_set():
-                await ws.send_text(json.dumps({
-                    "type": "audio_end",
-                    "tts_time": round(tts_time, 2),
-                }))
+            await tts_stream.stream_tts_sentences(ws, tts_backend, sentences, interrupted)
 
     except WebSocketDisconnect:
         print("Client disconnected")

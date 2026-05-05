@@ -25,7 +25,7 @@ Browser (mic + camera)
     ▼
 FastAPI server
     ├── Gemma 4 via LiteRT-LM (GPU)  →  understands speech + vision
-    └── Kokoro TTS (MLX on Mac, ONNX on Linux)  →  speaks back
+    └── Qwen3 TTS (MLX on Mac, ONNX on Linux fallback)  →  speaks back
     │
     │  WebSocket (streamed audio chunks)
     ▼
@@ -33,7 +33,7 @@ Browser (playback + transcript)
 ```
 
 - **Voice Activity Detection** in the browser ([Silero VAD](https://github.com/ricky0123/vad)). Hands-free, no push-to-talk.
-- **Barge-in.** Interrupt the AI mid-sentence by speaking.
+- **Echo suppression.** Ignores assistant playback during and shortly after TTS to avoid repeated self-triggering.
 - **Sentence-level TTS streaming.** Audio starts playing before the full response is generated.
 
 ## Requirements
@@ -58,14 +58,50 @@ uv run server.py
 
 Open [http://localhost:8000](http://localhost:8000), grant camera and microphone access, and start talking.
 
-If present, the app uses a `.litertlm` file from the project `models/` directory. Otherwise, models are downloaded automatically into `models/` on first run (~2.6 GB for Gemma 4 E2B, plus TTS models).
+If present, the app uses a `.litertlm` file from the project `models/` directory. On Apple Silicon, TTS defaults to `models/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16`; otherwise that model is downloaded automatically into `models/` on first run.
+
+To use an existing local Qwen3 TTS checkout without another download, place or symlink it at:
+
+```bash
+models/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16
+```
+
+Or point to it explicitly:
+
+```bash
+TTS_MODEL_PATH=/path/to/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16 uv run server.py
+```
+
+For a fixed young female voice, use the VoiceDesign instruction. Voice lock is enabled by default: on startup the app generates one short reference clip from `TTS_VOICE_LOCK_TEXT`, then clones that reference for later TTS calls.
+
+```bash
+TTS_VOICE_INSTRUCT=年轻女性，普通话标准，声音清晰自然，音色稳定，语速适中。 \
+TTS_VOICE_LOCK=1 \
+TTS_TEMPERATURE=0 \
+uv run server.py
+```
+
+For the most stable voice, provide a short real reference clip and its exact transcript:
+
+```bash
+TTS_REF_AUDIO=../models/voices/young-female.wav \
+TTS_REF_TEXT=你好，我是一个声音清晰自然的年轻女性。 \
+uv run server.py
+```
 
 ## Configuration
 
 | Variable     | Default                                                           | Description                                      |
 | ------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
-| `MODEL_PATH` | project `models/`, then auto-download E2B into `models/`           | Path to a `.litertlm` file or directory          |
-| `PORT`       | `8000`                                                            | Server port                                      |
+| `MODEL_PATH`     | project `models/`, then auto-download E2B into `models/`           | Path to a `.litertlm` file or directory          |
+| `TTS_MODEL_PATH` | project `models/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16` on Apple Silicon | Path to a local mlx-audio TTS model directory |
+| `TTS_VOICE_INSTRUCT` | `年轻女性，普通话标准，声音清晰自然，音色稳定，语速适中。` | VoiceDesign voice description |
+| `TTS_VOICE_LOCK` | `1` | Generate one VoiceDesign reference clip and reuse it through ICL |
+| `TTS_VOICE_LOCK_TEXT` | `你好，我是你的语音助手，声音清晰自然，音色稳定。` | Text used for the generated voice-lock reference |
+| `TTS_TEMPERATURE` | `0` | Greedy decoding for more stable TTS |
+| `TTS_STREAMING_INTERVAL` | `0.5` | Qwen streaming chunk interval in seconds |
+| `TTS_REF_AUDIO` / `TTS_REF_TEXT` | unset | Optional real reference clip and exact transcript |
+| `PORT`           | `8000`                                                            | Server port                                      |
 
 ## Performance (Apple M3 Pro)
 
