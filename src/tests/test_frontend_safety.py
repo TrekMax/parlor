@@ -49,6 +49,14 @@ class FrontendSafetyTests(unittest.TestCase):
         self.assertIn("currentAudioJobId = msg.job_id || null;", html)
         self.assertIn("isStaleAudioMessage(msg)", html)
 
+    def test_tts_playback_uses_start_buffer_before_scheduling(self):
+        html = INDEX_HTML.read_text()
+
+        self.assertIn("const TTS_INITIAL_BUFFER_SECONDS = 0.25;", html)
+        self.assertIn("const TTS_SCHEDULE_LOOKAHEAD_SECONDS = 0.03;", html)
+        self.assertIn("audioCtx.currentTime + TTS_INITIAL_BUFFER_SECONDS", html)
+        self.assertIn("audioCtx.currentTime + TTS_SCHEDULE_LOOKAHEAD_SECONDS", html)
+
 
 if __name__ == "__main__":
     unittest.main()

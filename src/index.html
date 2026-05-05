@@ -484,6 +484,8 @@ let ignoreSpeechUntil = 0;
 const ASSISTANT_AUDIO_COOLDOWN_MS = 1200;
 const LISTENING_VAD_THRESHOLD = 0.35;
 const SPEAKING_VAD_THRESHOLD = 0.92;
+const TTS_INITIAL_BUFFER_SECONDS = 0.25;
+const TTS_SCHEDULE_LOOKAHEAD_SECONDS = 0.03;
 
 // ── Waveform Visualizer ──
 let analyser, micSource;
@@ -813,7 +815,7 @@ function startStreamPlayback() {
   stopPlayback();
   ensureAudioCtx();
   resumeAudioContext();
-  streamNextTime = audioCtx.currentTime + 0.05; // Small initial buffer
+  streamNextTime = audioCtx.currentTime + TTS_INITIAL_BUFFER_SECONDS;
   ttsStreamActive = true;
   assistantAudioActive = true;
   suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
@@ -841,7 +843,7 @@ function queueAudioChunk(base64Pcm) {
   source.connect(analyser);
 
   // Schedule gapless playback
-  const startAt = Math.max(streamNextTime, audioCtx.currentTime);
+  const startAt = Math.max(streamNextTime, audioCtx.currentTime + TTS_SCHEDULE_LOOKAHEAD_SECONDS);
   source.start(startAt);
   streamNextTime = startAt + audioBuffer.duration;
 
