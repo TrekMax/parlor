@@ -21,8 +21,7 @@ import tts_stream
 MODEL_PATH = model_config.resolve_model_path()
 SYSTEM_PROMPT = (
     "你是一个友好、善于交谈的AI助手。用户正在通过麦克风与你对话（用户可能会多种语言穿插对话），并且正在用摄像头给你展示画面。\n\n"
-    "你**必须始终使用 respond_to_user 工具**来回复用户。\n\n"
-    "如果用户询问当前时间、日期或天气，可以先调用 get_current_time 或 get_weather 获取信息；拿到信息后，仍然必须用 respond_to_user 回复用户。\n\n"
+    "你**必须始终只使用 respond_to_user 工具**来回复用户。\n\n"
     "请按以下两步执行：\n"
     "1. 首先，逐字转述用户说的话\n"
     "2. 然后，写出你的回答\n\n"
@@ -97,7 +96,7 @@ async def websocket_endpoint(ws: WebSocket):
     def create_conversation():
         return engine.create_conversation(
             messages=[{"role": "system", "content": SYSTEM_PROMPT}],
-            tools=[respond_to_user, assistant_tools.get_current_time, assistant_tools.get_weather],
+            tools=[respond_to_user],
         )
 
     conversation = create_conversation()
@@ -182,6 +181,9 @@ async def websocket_endpoint(ws: WebSocket):
                     .strip()
                 )
                 text_response = response_utils.normalize_response_text(tool_result.get("response", ""))
+                lookup_response = assistant_tools.answer_lookup_request(transcription)
+                if lookup_response:
+                    text_response = lookup_response
                 print(f"LLM ({llm_time:.2f}s) [tool] heard: {transcription!r} → {text_response}")
             else:
                 transcription = None

@@ -20,12 +20,12 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertNotIn("The user just spoke", source)
         self.assertNotIn("Respond to what they said", source)
 
-    def test_conversation_registers_time_and_weather_tools(self):
+    def test_conversation_keeps_single_final_response_tool(self):
         source = SERVER_PY.read_text()
 
-        self.assertIn("assistant_tools.get_current_time", source)
-        self.assertIn("assistant_tools.get_weather", source)
-        self.assertIn("仍然必须用 respond_to_user 回复用户", source)
+        self.assertIn("tools=[respond_to_user]", source)
+        self.assertIn("answer_lookup_request(transcription)", source)
+        self.assertNotIn("tools=[respond_to_user, assistant_tools", source)
 
 
 if __name__ == "__main__":
