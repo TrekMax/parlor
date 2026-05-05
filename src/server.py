@@ -119,7 +119,14 @@ async def websocket_endpoint(ws: WebSocket):
 
     interrupted = asyncio.Event()
     msg_queue = asyncio.Queue()
+    send_queue = asyncio.Queue()
     tts_worker = tts_stream.TTSWorker(tts_backend)
+
+    class QueuedWebSocket:
+        async def send_text(self, text):
+            await send_queue.put(text)
+
+    send_ws = QueuedWebSocket()
 
     async def receiver():
         """Receive messages from WebSocket and route them."""
@@ -136,7 +143,19 @@ async def websocket_endpoint(ws: WebSocket):
         except WebSocketDisconnect:
             await msg_queue.put(None)
 
+    async def sender():
+        """Serialize all outbound WebSocket writes."""
+        while True:
+            text = await send_queue.get()
+            try:
+                if text is None:
+                    return
+                await ws.send_text(text)
+            finally:
+                send_queue.task_done()
+
     recv_task = asyncio.create_task(receiver())
+    send_task = asyncio.create_task(sender())
 
     try:
         while True:
@@ -170,12 +189,12 @@ async def websocket_endpoint(ws: WebSocket):
                 conversation.__exit__(None, None, None)
                 conversation = create_conversation()
                 conversation.__enter__()
-                await ws.send_text(json.dumps({
+                await send_ws.send_text(json.dumps({
                     "type": "text",
                     "text": response_utils.FALLBACK_RESPONSE,
                     "llm_time": round(llm_time, 2),
                 }))
-                await ws.send_text(json.dumps({
+                await send_ws.send_text(json.dumps({
                     "type": "audio_end",
                     "tts_time": 0,
                     "skipped": True,
@@ -228,7 +247,7 @@ async def websocket_endpoint(ws: WebSocket):
             reply = {"type": "text", "text": text_response, "llm_time": round(llm_time, 2)}
             if transcription:
                 reply["transcription"] = transcription
-            await ws.send_text(json.dumps(reply))
+            await send_ws.send_text(json.dumps(reply))
 
             if interrupted.is_set():
                 print("Interrupted before TTS, skipping audio")
@@ -236,7 +255,7 @@ async def websocket_endpoint(ws: WebSocket):
 
             if not response_utils.should_stream_tts(used_tool=used_tool, text=text_response):
                 print("Skipping TTS for non-tool or empty response")
-                await ws.send_text(json.dumps({
+                await send_ws.send_text(json.dumps({
                     "type": "audio_end",
                     "tts_time": 0,
                     "skipped": True,
@@ -250,7 +269,7 @@ async def websocket_endpoint(ws: WebSocket):
 
             await tts_worker.submit(
                 tts_stream.TTSJob(
-                    ws=ws,
+                    ws=send_ws,
                     sentences=sentences,
                     interrupted=tts_interrupted,
                     job_id=job_id,
@@ -262,6 +281,8 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         tts_worker.interrupt()
         await tts_worker.close()
+        await send_queue.put(None)
+        await send_task
         recv_task.cancel()
         conversation.__exit__(None, None, None)
         active_session_lock.release()

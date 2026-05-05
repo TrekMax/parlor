@@ -49,6 +49,16 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertIn("tts_worker.interrupt()", source)
         self.assertIn("await tts_worker.close()", source)
 
+    def test_websocket_sends_are_serialized_through_queue(self):
+        source = SERVER_PY.read_text()
+
+        self.assertIn("send_queue = asyncio.Queue()", source)
+        self.assertIn("async def sender():", source)
+        self.assertIn("class QueuedWebSocket:", source)
+        self.assertIn("send_ws = QueuedWebSocket()", source)
+        self.assertIn("tts_stream.TTSJob(", source)
+        self.assertIn("ws=send_ws", source)
+
 
 if __name__ == "__main__":
     unittest.main()
