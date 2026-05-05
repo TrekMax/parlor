@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,7 +31,6 @@ SYSTEM_PROMPT = (
 
 engine = None
 tts_backend = None
-tts_generation_lock = asyncio.Lock()
 active_session_lock = asyncio.Lock()
 
 
@@ -119,6 +119,7 @@ async def websocket_endpoint(ws: WebSocket):
 
     interrupted = asyncio.Event()
     msg_queue = asyncio.Queue()
+    tts_worker = tts_stream.TTSWorker(tts_backend)
 
     async def receiver():
         """Receive messages from WebSocket and route them."""
@@ -128,6 +129,7 @@ async def websocket_endpoint(ws: WebSocket):
                 msg = json.loads(raw)
                 if msg.get("type") == "interrupt":
                     interrupted.set()
+                    tts_worker.interrupt()
                     print("Client interrupted")
                 else:
                     await msg_queue.put(msg)
@@ -243,18 +245,23 @@ async def websocket_endpoint(ws: WebSocket):
 
             # Streaming TTS: split into sentences and send chunks progressively
             sentences = response_utils.sentences_for_tts(text_response)
+            tts_interrupted = asyncio.Event()
+            job_id = uuid.uuid4().hex
 
-            await tts_stream.stream_tts_sentences(
-                ws,
-                tts_backend,
-                sentences,
-                interrupted,
-                generation_lock=tts_generation_lock,
+            await tts_worker.submit(
+                tts_stream.TTSJob(
+                    ws=ws,
+                    sentences=sentences,
+                    interrupted=tts_interrupted,
+                    job_id=job_id,
+                )
             )
 
     except WebSocketDisconnect:
         print("Client disconnected")
     finally:
+        tts_worker.interrupt()
+        await tts_worker.close()
         recv_task.cancel()
         conversation.__exit__(None, None, None)
         active_session_lock.release()

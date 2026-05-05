@@ -141,6 +141,55 @@ class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ws.messages, [])
 
+    async def test_stream_messages_include_job_id_when_provided(self):
+        ws = FakeWebSocket()
+
+        await tts_stream.stream_tts_sentences(ws, FakeTTSBackend([]), ["你好"], asyncio.Event(), job_id="job-1")
+
+        self.assertEqual([m["job_id"] for m in ws.messages], ["job-1", "job-1", "job-1"])
+
+    async def test_worker_processes_latest_job_and_skips_stale_job(self):
+        events = []
+        worker = tts_stream.TTSWorker(FakeTTSBackend(events))
+        first = tts_stream.TTSJob(FakeWebSocket(events), ["旧回复"], asyncio.Event(), "job-1")
+        second = tts_stream.TTSJob(FakeWebSocket(events), ["新回复"], asyncio.Event(), "job-2")
+
+        await worker.submit(first)
+        await worker.submit(second)
+        await worker.wait_until_idle()
+        await worker.close()
+
+        self.assertNotIn("generate:旧回复", events)
+        self.assertIn("generate:新回复", events)
+
+    async def test_worker_interrupt_clears_pending_jobs(self):
+        events = []
+        worker = tts_stream.TTSWorker(FakeTTSBackend(events))
+        job = tts_stream.TTSJob(FakeWebSocket(events), ["你好"], asyncio.Event(), "job-1")
+
+        await worker.submit(job)
+        worker.interrupt()
+        await worker.wait_until_idle()
+        await worker.close()
+
+        self.assertTrue(job.interrupted.is_set())
+        self.assertEqual(events, [])
+
+    async def test_worker_submit_interrupts_current_job(self):
+        events = []
+        worker = tts_stream.TTSWorker(FakeBlockingStreamingTTSBackend(events), poll_interval=0.01)
+        first = tts_stream.TTSJob(FakeWebSocket(events), ["旧回复"], asyncio.Event(), "job-1")
+        second = tts_stream.TTSJob(FakeWebSocket(events), ["新回复"], asyncio.Event(), "job-2")
+
+        await worker.submit(first)
+        while not events:
+            await asyncio.sleep(0.001)
+
+        await worker.submit(second)
+
+        self.assertTrue(first.interrupted.is_set())
+        await worker.close()
+
 
 if __name__ == "__main__":
     unittest.main()

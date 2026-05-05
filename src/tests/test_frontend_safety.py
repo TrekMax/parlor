@@ -42,6 +42,13 @@ class FrontendSafetyTests(unittest.TestCase):
         self.assertIn("document.addEventListener('pointerdown', initAudio", html)
         self.assertIn("document.addEventListener('touchstart', initAudio", html)
 
+    def test_tts_playback_filters_stale_audio_jobs(self):
+        html = INDEX_HTML.read_text()
+
+        self.assertIn("let currentAudioJobId = null;", html)
+        self.assertIn("currentAudioJobId = msg.job_id || null;", html)
+        self.assertIn("isStaleAudioMessage(msg)", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+from dataclasses import dataclass
 import json
 import time
 
@@ -50,6 +51,7 @@ async def _stream_tts_sentences_unlocked(
     sentences: list[str],
     interrupted: asyncio.Event,
     poll_interval: float,
+    job_id: str | None = None,
 ) -> tuple[float, asyncio.Future | None]:
     """Generate and stream TTS audio, announcing playback only after audio exists."""
     tts_start = time.time()
@@ -76,30 +78,39 @@ async def _stream_tts_sentences_unlocked(
                 break
 
             if not audio_started:
-                await ws.send_text(json.dumps({
+                message = {
                     "type": "audio_start",
                     "sample_rate": tts_backend.sample_rate,
                     "sentence_count": len(sentences),
-                }))
+                }
+                if job_id:
+                    message["job_id"] = job_id
+                await ws.send_text(json.dumps(message))
                 audio_started = True
 
-            await ws.send_text(json.dumps({
+            message = {
                 "type": "audio_chunk",
                 "audio": _encode_pcm_chunk(pcm),
                 "index": i,
                 "chunk_index": chunk_index,
-            }))
+            }
+            if job_id:
+                message["job_id"] = job_id
+            await ws.send_text(json.dumps(message))
             chunk_index += 1
 
     tts_time = time.time() - tts_start
     print(f"TTS ({tts_time:.2f}s): {len(sentences)} sentences")
 
     if not interrupted.is_set():
-        await ws.send_text(json.dumps({
+        message = {
             "type": "audio_end",
             "tts_time": round(tts_time, 2),
             "skipped": not audio_started,
-        }))
+        }
+        if job_id:
+            message["job_id"] = job_id
+        await ws.send_text(json.dumps(message))
 
     return tts_time, None
 
@@ -111,11 +122,12 @@ async def stream_tts_sentences(
     interrupted: asyncio.Event,
     generation_lock: asyncio.Lock | None = None,
     poll_interval: float = 0.05,
+    job_id: str | None = None,
 ) -> float:
     """Generate and stream TTS audio, optionally serializing backend generation."""
     if generation_lock is None:
         tts_time, _pending_future = await _stream_tts_sentences_unlocked(
-            ws, tts_backend, sentences, interrupted, poll_interval
+            ws, tts_backend, sentences, interrupted, poll_interval, job_id=job_id
         )
         return tts_time
 
@@ -125,7 +137,7 @@ async def stream_tts_sentences(
         if interrupted.is_set():
             return 0.0
         tts_time, pending_future = await _stream_tts_sentences_unlocked(
-            ws, tts_backend, sentences, interrupted, poll_interval
+            ws, tts_backend, sentences, interrupted, poll_interval, job_id=job_id
         )
         if pending_future is not None:
             release_now = False
@@ -134,3 +146,92 @@ async def stream_tts_sentences(
     finally:
         if release_now:
             generation_lock.release()
+
+
+@dataclass
+class TTSJob:
+    ws: object
+    sentences: list[str]
+    interrupted: asyncio.Event
+    job_id: str
+
+
+class TTSWorker:
+    """Single-worker TTS pipeline that keeps only the latest pending job."""
+
+    def __init__(self, tts_backend, poll_interval: float = 0.05):
+        self.tts_backend = tts_backend
+        self.poll_interval = poll_interval
+        self.queue = asyncio.Queue(maxsize=1)
+        self.current_job: TTSJob | None = None
+        self._closed = False
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._task = asyncio.create_task(self._run())
+
+    async def submit(self, job: TTSJob):
+        if self.current_job is not None:
+            self.current_job.interrupted.set()
+
+        while not self.queue.empty():
+            stale = self.queue.get_nowait()
+            stale.interrupted.set()
+            self.queue.task_done()
+
+        self._idle.clear()
+        await self.queue.put(job)
+
+    def interrupt(self):
+        if self.current_job is not None:
+            self.current_job.interrupted.set()
+        while not self.queue.empty():
+            stale = self.queue.get_nowait()
+            stale.interrupted.set()
+            self.queue.task_done()
+        if self.current_job is None:
+            self._idle.set()
+
+    async def wait_until_idle(self):
+        await self._idle.wait()
+
+    async def close(self):
+        self._closed = True
+        self.interrupt()
+        await self.queue.put(None)
+        await self._task
+
+    async def _run(self):
+        while True:
+            job = await self.queue.get()
+            if job is None:
+                self.queue.task_done()
+                return
+
+            # Give a burst of submissions a chance to collapse to the latest job.
+            await asyncio.sleep(0)
+            while not self.queue.empty():
+                newer = self.queue.get_nowait()
+                if newer is None:
+                    self.queue.task_done()
+                    self.queue.task_done()
+                    return
+                job.interrupted.set()
+                self.queue.task_done()
+                job = newer
+
+            self.current_job = job
+            try:
+                if not job.interrupted.is_set():
+                    await stream_tts_sentences(
+                        job.ws,
+                        self.tts_backend,
+                        job.sentences,
+                        job.interrupted,
+                        poll_interval=self.poll_interval,
+                        job_id=job.job_id,
+                    )
+            finally:
+                self.current_job = None
+                self.queue.task_done()
+                if self.queue.empty():
+                    self._idle.set()

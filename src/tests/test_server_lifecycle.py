@@ -40,6 +40,15 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertIn("await active_session_lock.acquire()", source)
         self.assertIn("active_session_lock.release()", source)
 
+    def test_server_uses_tts_worker_pipeline(self):
+        source = SERVER_PY.read_text()
+
+        self.assertIn("tts_worker = tts_stream.TTSWorker(tts_backend)", source)
+        self.assertIn("await tts_worker.submit(", source)
+        self.assertIn("tts_stream.TTSJob(", source)
+        self.assertIn("tts_worker.interrupt()", source)
+        self.assertIn("await tts_worker.close()", source)
+
 
 if __name__ == "__main__":
     unittest.main()

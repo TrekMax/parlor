@@ -477,6 +477,7 @@ let streamNextTime = 0;         // When to schedule next chunk
 let streamSources = [];         // Active AudioBufferSourceNodes
 let streamTtsTime = null;
 let ttsStreamActive = false;
+let currentAudioJobId = null;
 let assistantAudioActive = false;
 let suppressCurrentSpeech = false;
 let ignoreSpeechUntil = 0;
@@ -647,8 +648,10 @@ function connect() {
       if (ignoreIncomingAudio) return;
       streamSampleRate = msg.sample_rate || 24000;
       startStreamPlayback();
+      currentAudioJobId = msg.job_id || null;
     } else if (msg.type === 'audio_chunk') {
       if (ignoreIncomingAudio) return;
+      if (isStaleAudioMessage(msg)) return;
       queueAudioChunk(msg.audio);
     } else if (msg.type === 'audio_end') {
       if (ignoreIncomingAudio) {
@@ -657,7 +660,9 @@ function connect() {
         setState('listening');
         return;
       }
+      if (isStaleAudioMessage(msg)) return;
       ttsStreamActive = false;
+      currentAudioJobId = null;
       streamTtsTime = msg.tts_time;
       const meta = messagesDiv.querySelector('.msg.assistant:last-child .meta');
       if (meta) meta.textContent += ` · TTS ${msg.tts_time}s`;
@@ -670,6 +675,10 @@ function connect() {
 }
 
 function setStatus(cls, text) { statusEl.className = `status-pill ${cls}`; statusEl.textContent = text; }
+
+function isStaleAudioMessage(msg) {
+  return currentAudioJobId && msg.job_id && msg.job_id !== currentAudioJobId;
+}
 
 function suppressSpeechFor(ms) {
   ignoreSpeechUntil = Math.max(ignoreSpeechUntil, Date.now() + ms);
@@ -766,6 +775,7 @@ function stopPlayback() {
   currentSource = null;
   streamNextTime = 0;
   ttsStreamActive = false;
+  currentAudioJobId = null;
   assistantAudioActive = false;
   suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
 }
