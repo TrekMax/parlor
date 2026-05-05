@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -67,6 +68,22 @@ class FakeBlockingStreamingTTSBackend:
         self.events.append(f"start:{text}")
         time.sleep(0.3)
         yield np.array([0.0], dtype=np.float32)
+
+
+class FakeEmptyStreamingTTSBackend:
+    sample_rate = 24000
+
+    def __init__(self, events):
+        self.events = events
+
+    def stream_generate(self, text):
+        self.events.append(f"stream:{text}:empty")
+        return
+        yield
+
+    def generate(self, text):
+        self.events.append(f"generate:{text}:fallback")
+        return np.array([0.2, 0.3], dtype=np.float32)
 
 
 class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
@@ -147,6 +164,28 @@ class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
         await tts_stream.stream_tts_sentences(ws, FakeTTSBackend([]), ["你好"], asyncio.Event(), job_id="job-1")
 
         self.assertEqual([m["job_id"] for m in ws.messages], ["job-1", "job-1", "job-1"])
+
+    async def test_stream_logs_audio_chunk_stats(self):
+        events = []
+        ws = FakeWebSocket(events)
+
+        with patch("builtins.print") as print_mock:
+            await tts_stream.stream_tts_sentences(ws, FakeTTSBackend(events), ["你好"], asyncio.Event(), job_id="job-1")
+
+        output = "\n".join(str(call.args[0]) for call in print_mock.call_args_list)
+        self.assertIn("chunks=1", output)
+        self.assertIn("samples=2", output)
+        self.assertIn("peak=", output)
+
+    async def test_empty_streaming_backend_falls_back_to_generate(self):
+        events = []
+        ws = FakeWebSocket(events)
+
+        await tts_stream.stream_tts_sentences(ws, FakeEmptyStreamingTTSBackend(events), ["你好"], asyncio.Event())
+
+        self.assertIn("stream:你好:empty", events)
+        self.assertIn("generate:你好:fallback", events)
+        self.assertEqual([m["type"] for m in ws.messages], ["audio_start", "audio_chunk", "audio_end"])
 
     async def test_worker_processes_latest_job_and_skips_stale_job(self):
         events = []

@@ -128,11 +128,22 @@ class QwenMLXBackend(TTSBackend):
 
     def generate(self, text: str, voice: str | None = None, speed: float = 1.0) -> np.ndarray:
         results = list(self._generate_results(text=text, voice=voice, speed=speed))
+        if not results and self.ref_audio and self.ref_text:
+            print("TTS: reference audio generated no audio, falling back to voice instruction")
+            results = list(self._generate_without_reference(text=text, voice=voice, speed=speed, stream=False))
+        if not results:
+            raise RuntimeError("Qwen3 TTS generated no audio")
         return np.concatenate([np.array(r.audio) for r in results])
 
     def stream_generate(self, text: str, voice: str | None = None, speed: float = 1.0):
+        yielded = False
         for result in self._generate_results(text=text, voice=voice, speed=speed, stream=True):
+            yielded = True
             yield np.array(result.audio)
+        if not yielded and self.ref_audio and self.ref_text:
+            print("TTS: reference audio stream generated no audio, falling back to voice instruction")
+            for result in self._generate_without_reference(text=text, voice=voice, speed=speed, stream=False):
+                yield np.array(result.audio)
 
     def _generate_results(
         self,
@@ -191,34 +202,10 @@ class QwenMLXBackend(TTSBackend):
             )
 
         if self.voice_instruct and self._model_tts_type() == "voice_design":
-            return self._model.generate(
-                text=text,
-                voice=voice,
-                speed=speed,
-                lang_code=self.lang_code,
-                instruct=self.voice_instruct,
-                temperature=self.temperature,
-                verbose=False,
-                max_tokens=max_tokens,
-                stream=stream,
-                streaming_interval=self.streaming_interval,
-            )
+            return self._generate_voice_design_instruct(text, voice, speed, max_tokens, stream)
 
         if self.voice_instruct and hasattr(self._model, "_generate_with_instruct"):
-            return self._model._generate_with_instruct(
-                text=text,
-                speaker=voice,
-                language=self.lang_code,
-                instruct=self.voice_instruct,
-                temperature=self.temperature,
-                max_tokens=max_tokens,
-                top_k=50,
-                top_p=1.0,
-                repetition_penalty=1.05,
-                verbose=False,
-                stream=stream,
-                streaming_interval=self.streaming_interval,
-            )
+            return self._generate_with_instruct(text, voice, max_tokens, stream)
 
         return self._model.generate(
             text=text,
@@ -228,6 +215,69 @@ class QwenMLXBackend(TTSBackend):
             temperature=self.temperature,
             verbose=False,
             max_tokens=max_tokens,
+            stream=stream,
+            streaming_interval=self.streaming_interval,
+        )
+
+    def _generate_without_reference(
+        self,
+        text: str,
+        voice: str | None = None,
+        speed: float = 1.0,
+        max_tokens: int = 4096,
+        stream: bool = False,
+    ):
+        if self.voice_instruct and self._model_tts_type() == "voice_design":
+            return self._generate_voice_design_instruct(text, voice, speed, max_tokens, stream)
+
+        if self.voice_instruct and hasattr(self._model, "_generate_with_instruct"):
+            return self._generate_with_instruct(text, voice, max_tokens, stream)
+
+        return self._model.generate(
+            text=text,
+            voice=voice,
+            speed=speed,
+            lang_code=self.lang_code,
+            temperature=self.temperature,
+            verbose=False,
+            max_tokens=max_tokens,
+            stream=stream,
+            streaming_interval=self.streaming_interval,
+        )
+
+    def _generate_voice_design_instruct(
+        self,
+        text: str,
+        voice: str | None,
+        speed: float,
+        max_tokens: int,
+        stream: bool,
+    ):
+        return self._model.generate(
+            text=text,
+            voice=voice,
+            speed=speed,
+            lang_code=self.lang_code,
+            instruct=self.voice_instruct,
+            temperature=self.temperature,
+            verbose=False,
+            max_tokens=max_tokens,
+            stream=stream,
+            streaming_interval=self.streaming_interval,
+        )
+
+    def _generate_with_instruct(self, text: str, voice: str | None, max_tokens: int, stream: bool):
+        return self._model._generate_with_instruct(
+            text=text,
+            speaker=voice,
+            language=self.lang_code,
+            instruct=self.voice_instruct,
+            temperature=self.temperature,
+            max_tokens=max_tokens,
+            top_k=50,
+            top_p=1.0,
+            repetition_penalty=1.05,
+            verbose=False,
             stream=stream,
             streaming_interval=self.streaming_interval,
         )

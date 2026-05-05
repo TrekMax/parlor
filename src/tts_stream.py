@@ -35,6 +35,13 @@ def _stream_chunks(tts_backend, sentence: str):
     return generate_once()
 
 
+def _generate_once_or_end(tts_backend, sentence: str):
+    pcm = tts_backend.generate(sentence)
+    if np.asarray(pcm).size == 0:
+        return _END_OF_STREAM
+    return pcm
+
+
 async def _next_chunk_or_interrupt(loop, chunks, interrupted: asyncio.Event, poll_interval: float):
     future = loop.run_in_executor(None, lambda: _next_chunk_or_end(chunks))
     while True:
@@ -56,6 +63,9 @@ async def _stream_tts_sentences_unlocked(
     """Generate and stream TTS audio, announcing playback only after audio exists."""
     tts_start = time.time()
     audio_started = False
+    chunk_count = 0
+    sample_count = 0
+    peak_amplitude = 0.0
     loop = asyncio.get_event_loop()
 
     for i, sentence in enumerate(sentences):
@@ -72,10 +82,20 @@ async def _stream_tts_sentences_unlocked(
                 print(f"Interrupted during TTS (sentence {i+1}/{len(sentences)})")
                 return tts_time, pending_future
             if pcm is _END_OF_STREAM:
-                break
+                if chunk_index > 0 or not hasattr(tts_backend, "generate"):
+                    break
+                pcm = await loop.run_in_executor(None, lambda: _generate_once_or_end(tts_backend, sentence))
+                if pcm is _END_OF_STREAM:
+                    break
 
             if interrupted.is_set():
                 break
+
+            pcm_array = np.asarray(pcm).reshape(-1)
+            chunk_count += 1
+            sample_count += pcm_array.size
+            if pcm_array.size:
+                peak_amplitude = max(peak_amplitude, float(np.max(np.abs(pcm_array))))
 
             if not audio_started:
                 message = {
@@ -100,7 +120,10 @@ async def _stream_tts_sentences_unlocked(
             chunk_index += 1
 
     tts_time = time.time() - tts_start
-    print(f"TTS ({tts_time:.2f}s): {len(sentences)} sentences")
+    print(
+        f"TTS ({tts_time:.2f}s): {len(sentences)} sentences, "
+        f"chunks={chunk_count}, samples={sample_count}, peak={peak_amplitude:.4f}"
+    )
 
     if not interrupted.is_set():
         message = {
