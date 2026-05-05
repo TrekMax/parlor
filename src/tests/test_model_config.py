@@ -32,6 +32,17 @@ class ResolveModelPathTests(unittest.TestCase):
 
             self.assertEqual(resolved, str(model_file))
 
+    def test_invalid_model_path_raises_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing.litertlm"
+
+            with self.assertRaises(FileNotFoundError):
+                model_config.resolve_model_path(
+                    model_path=str(missing),
+                    models_dir=Path(tmp) / "models",
+                    downloader=lambda **_: self.fail("downloader should not be called"),
+                )
+
     def test_project_models_directory_is_preferred_before_download(self):
         with tempfile.TemporaryDirectory() as tmp:
             models_dir = Path(tmp) / "models"

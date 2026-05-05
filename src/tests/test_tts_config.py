@@ -66,6 +66,25 @@ class TTSConfigTests(unittest.TestCase):
 
 
 class QwenMLXBackendTests(unittest.TestCase):
+    def test_reference_audio_requires_reference_text(self):
+        class FakeModel:
+            sample_rate = 24000
+
+        with self.assertRaises(ValueError):
+            tts.QwenMLXBackend(model=FakeModel(), ref_audio="voice.wav", ref_text="")
+
+    def test_invalid_reference_audio_path_raises_clear_error_when_loading_real_model(self):
+        missing = Path(tempfile.gettempdir()) / "missing-parlor-reference.wav"
+        if missing.exists():
+            missing.unlink()
+
+        with self.assertRaises(FileNotFoundError):
+            tts.QwenMLXBackend(
+                model_path="/tmp/not-loaded-in-this-test",
+                ref_audio=str(missing),
+                ref_text="你好",
+            )
+
     def test_generate_uses_chinese_language_by_default(self):
         class FakeResult:
             sample_rate = 24000

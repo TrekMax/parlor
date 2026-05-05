@@ -111,6 +111,7 @@ class QwenMLXBackend(TTSBackend):
             else float(os.environ.get("TTS_STREAMING_INTERVAL", DEFAULT_QWEN_STREAMING_INTERVAL))
         )
         self._locked_ref_audio = None
+        self._validate_reference_config(validate_paths=model is None)
         if model is not None:
             self._model = model
             self.sample_rate = self._model.sample_rate
@@ -272,6 +273,16 @@ class QwenMLXBackend(TTSBackend):
 
             return load_audio(ref_audio, sample_rate=self.sample_rate)
         return ref_audio
+
+    def _validate_reference_config(self, validate_paths: bool):
+        if bool(self.ref_audio) != bool(self.ref_text):
+            raise ValueError("TTS_REF_AUDIO and TTS_REF_TEXT must be configured together")
+
+        if validate_paths and isinstance(self.ref_audio, (str, Path)):
+            ref_path = Path(self.ref_audio).expanduser()
+            if not ref_path.is_file():
+                raise FileNotFoundError(f"TTS_REF_AUDIO does not exist: {self.ref_audio}")
+            self.ref_audio = str(ref_path)
 
     def _ensure_voice_lock(self):
         if self._locked_ref_audio is not None:

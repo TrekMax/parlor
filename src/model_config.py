@@ -42,7 +42,7 @@ def resolve_model_path(
         resolved = _find_litertlm(Path(configured).expanduser())
         if resolved:
             return str(resolved)
-        return configured
+        raise FileNotFoundError(f"MODEL_PATH does not point to a .litertlm file: {configured}")
 
     models_dir = models_dir.expanduser()
     local_model = _find_litertlm(models_dir)
