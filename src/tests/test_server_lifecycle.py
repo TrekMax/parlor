@@ -13,6 +13,13 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertIn("unload_models()", source)
         self.assertIn("engine.__exit__(None, None, None)", source)
 
+    def test_runtime_task_prompts_are_chinese(self):
+        source = SERVER_PY.read_text()
+
+        self.assertIn("用户刚刚通过语音与你说话", source)
+        self.assertNotIn("The user just spoke", source)
+        self.assertNotIn("Respond to what they said", source)
+
 
 if __name__ == "__main__":
     unittest.main()

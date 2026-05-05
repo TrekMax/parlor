@@ -25,6 +25,9 @@ SYSTEM_PROMPT = (
     "1. 首先，逐字转述用户说的话\n"
     "2. 然后，写出你的回答\n\n"
 )
+TASK_PROMPT_AUDIO_IMAGE = "用户刚刚通过语音与你说话，同时正在用摄像头给你展示画面。请回复用户说的内容；如果画面相关，可以结合你看到的内容。"
+TASK_PROMPT_AUDIO = "用户刚刚通过语音与你说话。请回复用户说的内容。"
+TASK_PROMPT_IMAGE = "用户正在通过摄像头给你展示画面。请描述你看到的内容。"
 
 engine = None
 tts_backend = None
@@ -132,11 +135,11 @@ async def websocket_endpoint(ws: WebSocket):
                 content.append({"type": "image", "blob": msg["image"]})
 
             if msg.get("audio") and msg.get("image"):
-                content.append({"type": "text", "text": "The user just spoke to you (audio) while showing their camera (image). Respond to what they said, referencing what you see if relevant."})
+                content.append({"type": "text", "text": TASK_PROMPT_AUDIO_IMAGE})
             elif msg.get("audio"):
-                content.append({"type": "text", "text": "The user just spoke to you. Respond to what they said."})
+                content.append({"type": "text", "text": TASK_PROMPT_AUDIO})
             elif msg.get("image"):
-                content.append({"type": "text", "text": "The user is showing you their camera. Describe what you see."})
+                content.append({"type": "text", "text": TASK_PROMPT_IMAGE})
             else:
                 content.append({"type": "text", "text": msg.get("text", "Hello!")})
 
