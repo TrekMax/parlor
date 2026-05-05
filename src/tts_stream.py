@@ -9,6 +9,7 @@ import numpy as np
 
 
 _END_OF_STREAM = object()
+_INTERRUPTED = object()
 
 
 def _next_chunk_or_end(chunks):
@@ -33,7 +34,23 @@ def _stream_chunks(tts_backend, sentence: str):
     return generate_once()
 
 
-async def _stream_tts_sentences_unlocked(ws, tts_backend, sentences: list[str], interrupted: asyncio.Event) -> float:
+async def _next_chunk_or_interrupt(loop, chunks, interrupted: asyncio.Event, poll_interval: float):
+    future = loop.run_in_executor(None, lambda: _next_chunk_or_end(chunks))
+    while True:
+        done, _pending = await asyncio.wait({future}, timeout=poll_interval)
+        if done:
+            return future.result(), None
+        if interrupted.is_set():
+            return _INTERRUPTED, future
+
+
+async def _stream_tts_sentences_unlocked(
+    ws,
+    tts_backend,
+    sentences: list[str],
+    interrupted: asyncio.Event,
+    poll_interval: float,
+) -> tuple[float, asyncio.Future | None]:
     """Generate and stream TTS audio, announcing playback only after audio exists."""
     tts_start = time.time()
     audio_started = False
@@ -47,7 +64,11 @@ async def _stream_tts_sentences_unlocked(ws, tts_backend, sentences: list[str], 
         chunks = _stream_chunks(tts_backend, sentence)
         chunk_index = 0
         while not interrupted.is_set():
-            pcm = await loop.run_in_executor(None, lambda: _next_chunk_or_end(chunks))
+            pcm, pending_future = await _next_chunk_or_interrupt(loop, chunks, interrupted, poll_interval)
+            if pcm is _INTERRUPTED:
+                tts_time = time.time() - tts_start
+                print(f"Interrupted during TTS (sentence {i+1}/{len(sentences)})")
+                return tts_time, pending_future
             if pcm is _END_OF_STREAM:
                 break
 
@@ -80,7 +101,7 @@ async def _stream_tts_sentences_unlocked(ws, tts_backend, sentences: list[str], 
             "skipped": not audio_started,
         }))
 
-    return tts_time
+    return tts_time, None
 
 
 async def stream_tts_sentences(
@@ -89,12 +110,27 @@ async def stream_tts_sentences(
     sentences: list[str],
     interrupted: asyncio.Event,
     generation_lock: asyncio.Lock | None = None,
+    poll_interval: float = 0.05,
 ) -> float:
     """Generate and stream TTS audio, optionally serializing backend generation."""
     if generation_lock is None:
-        return await _stream_tts_sentences_unlocked(ws, tts_backend, sentences, interrupted)
+        tts_time, _pending_future = await _stream_tts_sentences_unlocked(
+            ws, tts_backend, sentences, interrupted, poll_interval
+        )
+        return tts_time
 
-    async with generation_lock:
+    await generation_lock.acquire()
+    release_now = True
+    try:
         if interrupted.is_set():
             return 0.0
-        return await _stream_tts_sentences_unlocked(ws, tts_backend, sentences, interrupted)
+        tts_time, pending_future = await _stream_tts_sentences_unlocked(
+            ws, tts_backend, sentences, interrupted, poll_interval
+        )
+        if pending_future is not None:
+            release_now = False
+            pending_future.add_done_callback(lambda _future: generation_lock.release())
+        return tts_time
+    finally:
+        if release_now:
+            generation_lock.release()

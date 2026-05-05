@@ -57,6 +57,18 @@ class FakeSlowStreamingTTSBackend:
         self.events.append(f"end:{text}")
 
 
+class FakeBlockingStreamingTTSBackend:
+    sample_rate = 24000
+
+    def __init__(self, events):
+        self.events = events
+
+    def stream_generate(self, text):
+        self.events.append(f"start:{text}")
+        time.sleep(0.3)
+        yield np.array([0.0], dtype=np.float32)
+
+
 class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_audio_start_is_sent_after_first_audio_is_generated(self):
         events = []
@@ -98,6 +110,27 @@ class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
                 ["start:二", "end:二", "start:一", "end:一"],
             ],
         )
+
+    async def test_interrupt_returns_without_waiting_for_blocked_chunk(self):
+        events = []
+        backend = FakeBlockingStreamingTTSBackend(events)
+        interrupted = asyncio.Event()
+        lock = asyncio.Lock()
+        task = asyncio.create_task(
+            tts_stream.stream_tts_sentences(FakeWebSocket(), backend, ["一"], interrupted, generation_lock=lock)
+        )
+
+        while not events:
+            await asyncio.sleep(0.001)
+
+        started = time.time()
+        interrupted.set()
+        await task
+
+        self.assertLess(time.time() - started, 0.1)
+        self.assertTrue(lock.locked())
+        await asyncio.sleep(0.35)
+        self.assertFalse(lock.locked())
 
     async def test_interrupted_before_audio_sends_no_start(self):
         ws = FakeWebSocket()
