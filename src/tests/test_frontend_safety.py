@@ -12,6 +12,14 @@ class FrontendSafetyTests(unittest.TestCase):
         self.assertNotIn("lastUserMsg.innerHTML = `${msg.transcription}", html)
         self.assertIn("document.createTextNode(text)", html)
 
+    def test_tts_playback_waits_for_audio_end_before_listening(self):
+        html = INDEX_HTML.read_text()
+
+        self.assertIn("let ttsStreamActive = false;", html)
+        self.assertIn("ttsStreamActive = true;", html)
+        self.assertIn("ttsStreamActive = false;", html)
+        self.assertIn("!ttsStreamActive && streamSources.length === 0", html)
+
 
 if __name__ == "__main__":
     unittest.main()

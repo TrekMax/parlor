@@ -475,6 +475,7 @@ let streamSampleRate = 24000;
 let streamNextTime = 0;         // When to schedule next chunk
 let streamSources = [];         // Active AudioBufferSourceNodes
 let streamTtsTime = null;
+let ttsStreamActive = false;
 let assistantAudioActive = false;
 let suppressCurrentSpeech = false;
 let ignoreSpeechUntil = 0;
@@ -651,6 +652,7 @@ function connect() {
         setState('listening');
         return;
       }
+      ttsStreamActive = false;
       streamTtsTime = msg.tts_time;
       const meta = messagesDiv.querySelector('.msg.assistant:last-child .meta');
       if (meta) meta.textContent += ` · TTS ${msg.tts_time}s`;
@@ -758,6 +760,7 @@ function stopPlayback() {
   streamSources = [];
   currentSource = null;
   streamNextTime = 0;
+  ttsStreamActive = false;
   assistantAudioActive = false;
   suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
 }
@@ -776,6 +779,7 @@ function startStreamPlayback() {
   ensureAudioCtx();
   if (audioCtx.state === 'suspended') audioCtx.resume();
   streamNextTime = audioCtx.currentTime + 0.05; // Small initial buffer
+  ttsStreamActive = true;
   assistantAudioActive = true;
   suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
   setState('speaking');
@@ -814,7 +818,7 @@ function queueAudioChunk(base64Pcm) {
     const idx = streamSources.indexOf(source);
     if (idx !== -1) streamSources.splice(idx, 1);
     // If this was the last chunk and no more are queued, return to listening
-    if (streamSources.length === 0 && state === 'speaking') {
+    if (!ttsStreamActive && streamSources.length === 0 && state === 'speaking') {
       currentSource = null;
       assistantAudioActive = false;
       suppressSpeechFor(ASSISTANT_AUDIO_COOLDOWN_MS);
