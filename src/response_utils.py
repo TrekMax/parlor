@@ -3,6 +3,8 @@
 import re
 
 SENTENCE_SPLIT_RE = re.compile(r'(?<=[。！？])\s*|(?<=[.!?])\s+')
+SHORT_TTS_SEGMENT_CHARS = 18
+MAX_TTS_SEGMENT_CHARS = 80
 MODEL_DELIMITER = '<|"|>'
 FALLBACK_RESPONSE = "I didn't catch that. Could you say it again?"
 
@@ -29,7 +31,45 @@ def extract_raw_response_text(response: dict) -> str:
 
 def sentences_for_tts(text: str) -> list[str]:
     """Return non-empty sentences that are safe to send to the TTS backend."""
-    return split_sentences(text)
+    sentences = split_sentences(text)
+    if not any(_contains_cjk(sentence) for sentence in sentences):
+        return sentences
+    return _merge_short_tts_segments(sentences)
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _merge_short_tts_segments(
+    sentences: list[str],
+    min_chars: int = SHORT_TTS_SEGMENT_CHARS,
+    max_chars: int = MAX_TTS_SEGMENT_CHARS,
+) -> list[str]:
+    """Merge short CJK TTS segments so Qwen3 ICL does not emit near-silence."""
+    merged = []
+    current = ""
+
+    for sentence in sentences:
+        candidate = current + sentence
+        if not current:
+            current = sentence
+            continue
+
+        if len(current) < min_chars or len(candidate) <= max_chars:
+            current = candidate
+            continue
+
+        merged.append(current)
+        current = sentence
+
+    if current:
+        if merged and len(current) < min_chars:
+            merged[-1] += current
+        else:
+            merged.append(current)
+
+    return merged
 
 
 def should_stream_tts(used_tool: bool, text: str) -> bool:

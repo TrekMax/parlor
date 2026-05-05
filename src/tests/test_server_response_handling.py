@@ -24,15 +24,28 @@ class ResponseHandlingTests(unittest.TestCase):
 
         self.assertEqual(sentences, ["Hello there.", "How can I help?"])
 
-    def test_tts_sentences_split_chinese_punctuation(self):
+    def test_tts_sentences_merge_short_chinese_punctuation(self):
         sentences = response_utils.sentences_for_tts("你好。我可以帮你吗？可以的！")
 
-        self.assertEqual(sentences, ["你好。", "我可以帮你吗？", "可以的！"])
+        self.assertEqual(sentences, ["你好。我可以帮你吗？可以的！"])
+
+    def test_tts_sentences_merge_short_chinese_segments(self):
+        sentences = response_utils.sentences_for_tts("你好！你看起来很开心。有什么我可以帮你的吗？")
+
+        self.assertEqual(sentences, ["你好！你看起来很开心。有什么我可以帮你的吗？"])
+
+    def test_tts_sentences_append_short_final_chinese_segment(self):
+        long_sentence = ("这" * (response_utils.MAX_TTS_SEGMENT_CHARS + 5)) + "。"
+
+        sentences = response_utils.sentences_for_tts(f"{long_sentence}好的！")
+
+        self.assertEqual(sentences[-1][-3:], "好的！")
+        self.assertGreaterEqual(len(sentences[-1]), response_utils.SHORT_TTS_SEGMENT_CHARS)
 
     def test_tts_sentences_do_not_split_decimal_numbers(self):
         sentences = response_utils.sentences_for_tts("版本是 3.14。可以继续。")
 
-        self.assertEqual(sentences, ["版本是 3.14。", "可以继续。"])
+        self.assertEqual(sentences, ["版本是 3.14。可以继续。"])
 
     def test_does_not_stream_tts_for_non_tool_fallback(self):
         self.assertFalse(response_utils.should_stream_tts(used_tool=False, text=response_utils.FALLBACK_RESPONSE))
