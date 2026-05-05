@@ -33,7 +33,7 @@ def _stream_chunks(tts_backend, sentence: str):
     return generate_once()
 
 
-async def stream_tts_sentences(ws, tts_backend, sentences: list[str], interrupted: asyncio.Event) -> float:
+async def _stream_tts_sentences_unlocked(ws, tts_backend, sentences: list[str], interrupted: asyncio.Event) -> float:
     """Generate and stream TTS audio, announcing playback only after audio exists."""
     tts_start = time.time()
     audio_started = False
@@ -81,3 +81,20 @@ async def stream_tts_sentences(ws, tts_backend, sentences: list[str], interrupte
         }))
 
     return tts_time
+
+
+async def stream_tts_sentences(
+    ws,
+    tts_backend,
+    sentences: list[str],
+    interrupted: asyncio.Event,
+    generation_lock: asyncio.Lock | None = None,
+) -> float:
+    """Generate and stream TTS audio, optionally serializing backend generation."""
+    if generation_lock is None:
+        return await _stream_tts_sentences_unlocked(ws, tts_backend, sentences, interrupted)
+
+    async with generation_lock:
+        if interrupted.is_set():
+            return 0.0
+        return await _stream_tts_sentences_unlocked(ws, tts_backend, sentences, interrupted)

@@ -28,6 +28,7 @@ SYSTEM_PROMPT = (
 
 engine = None
 tts_backend = None
+tts_generation_lock = asyncio.Lock()
 
 
 def load_models():
@@ -196,7 +197,13 @@ async def websocket_endpoint(ws: WebSocket):
             # Streaming TTS: split into sentences and send chunks progressively
             sentences = response_utils.sentences_for_tts(text_response)
 
-            await tts_stream.stream_tts_sentences(ws, tts_backend, sentences, interrupted)
+            await tts_stream.stream_tts_sentences(
+                ws,
+                tts_backend,
+                sentences,
+                interrupted,
+                generation_lock=tts_generation_lock,
+            )
 
     except WebSocketDisconnect:
         print("Client disconnected")

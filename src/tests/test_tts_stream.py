@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import unittest
 
 import numpy as np
@@ -43,6 +44,19 @@ class FakeStreamingTTSBackend:
         yield np.array([0.1], dtype=np.float32)
 
 
+class FakeSlowStreamingTTSBackend:
+    sample_rate = 24000
+
+    def __init__(self, events):
+        self.events = events
+
+    def stream_generate(self, text):
+        self.events.append(f"start:{text}")
+        time.sleep(0.01)
+        yield np.array([0.0], dtype=np.float32)
+        self.events.append(f"end:{text}")
+
+
 class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_audio_start_is_sent_after_first_audio_is_generated(self):
         events = []
@@ -66,6 +80,24 @@ class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
             ["stream:你好:first", "send:audio_start", "send:audio_chunk", "stream:你好:second"],
         )
         self.assertEqual([m["type"] for m in ws.messages], ["audio_start", "audio_chunk", "audio_chunk", "audio_end"])
+
+    async def test_generation_lock_serializes_concurrent_streams(self):
+        events = []
+        backend = FakeSlowStreamingTTSBackend(events)
+        lock = asyncio.Lock()
+
+        await asyncio.gather(
+            tts_stream.stream_tts_sentences(FakeWebSocket(), backend, ["一"], asyncio.Event(), generation_lock=lock),
+            tts_stream.stream_tts_sentences(FakeWebSocket(), backend, ["二"], asyncio.Event(), generation_lock=lock),
+        )
+
+        self.assertIn(
+            events,
+            [
+                ["start:一", "end:一", "start:二", "end:二"],
+                ["start:二", "end:二", "start:一", "end:一"],
+            ],
+        )
 
     async def test_interrupted_before_audio_sends_no_start(self):
         ws = FakeWebSocket()
