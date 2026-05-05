@@ -845,9 +845,9 @@ async function init() {
   // Initialize VAD with shared mic stream
   myvad = await vad.MicVAD.new({
     getStream: async () => new MediaStream(mediaStream.getAudioTracks()),
-    positiveSpeechThreshold: 0.5,
-    negativeSpeechThreshold: 0.25,
-    redemptionMs: 600,
+    positiveSpeechThreshold: 0.35,
+    negativeSpeechThreshold: 0.20,
+    redemptionMs: 800,
     minSpeechMs: 300,
     preSpeechPadMs: 300,
     onSpeechStart: handleSpeechStart,
