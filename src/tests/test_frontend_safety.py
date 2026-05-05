@@ -20,6 +20,13 @@ class FrontendSafetyTests(unittest.TestCase):
         self.assertIn("ttsStreamActive = false;", html)
         self.assertIn("!ttsStreamActive && streamSources.length === 0", html)
 
+    def test_vad_listening_threshold_is_shared_between_init_and_state_reset(self):
+        html = INDEX_HTML.read_text()
+
+        self.assertIn("const LISTENING_VAD_THRESHOLD = 0.35;", html)
+        self.assertIn("positiveSpeechThreshold: LISTENING_VAD_THRESHOLD", html)
+        self.assertIn("newState === 'speaking' ? SPEAKING_VAD_THRESHOLD : LISTENING_VAD_THRESHOLD", html)
+
 
 if __name__ == "__main__":
     unittest.main()

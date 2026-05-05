@@ -135,14 +135,14 @@ TTS_STREAMING_INTERVAL=0.5 uv run server.py
 当前浏览器端 VAD 使用 `@ricky0123/vad-web@0.0.29`：
 
 ```js
-positiveSpeechThreshold: 0.5,
-negativeSpeechThreshold: 0.25,
-redemptionMs: 600,
+positiveSpeechThreshold: 0.35,
+negativeSpeechThreshold: 0.20,
+redemptionMs: 800,
 minSpeechMs: 300,
 preSpeechPadMs: 300,
 ```
 
-AI 说话时会临时提高触发阈值：
+AI 说话时会临时提高触发阈值；回到 listening 时恢复为 `0.35`：
 
 ```js
 positiveSpeechThreshold: 0.92

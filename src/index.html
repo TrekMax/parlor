@@ -480,6 +480,8 @@ let assistantAudioActive = false;
 let suppressCurrentSpeech = false;
 let ignoreSpeechUntil = 0;
 const ASSISTANT_AUDIO_COOLDOWN_MS = 1200;
+const LISTENING_VAD_THRESHOLD = 0.35;
+const SPEAKING_VAD_THRESHOLD = 0.92;
 
 // ── Waveform Visualizer ──
 let analyser, micSource;
@@ -600,7 +602,9 @@ function setState(newState) {
 
   // Raise VAD threshold during speaking to reduce echo false triggers
   if (myvad) {
-    myvad.setOptions({ positiveSpeechThreshold: newState === 'speaking' ? 0.92 : 0.5 });
+    myvad.setOptions({
+      positiveSpeechThreshold: newState === 'speaking' ? SPEAKING_VAD_THRESHOLD : LISTENING_VAD_THRESHOLD
+    });
   }
 
   // Connect/disconnect mic analyser based on state
@@ -865,7 +869,7 @@ async function init() {
   // Initialize VAD with shared mic stream
   myvad = await vad.MicVAD.new({
     getStream: async () => new MediaStream(mediaStream.getAudioTracks()),
-    positiveSpeechThreshold: 0.35,
+    positiveSpeechThreshold: LISTENING_VAD_THRESHOLD,
     negativeSpeechThreshold: 0.20,
     redemptionMs: 800,
     minSpeechMs: 300,
