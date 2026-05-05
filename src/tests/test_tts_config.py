@@ -334,6 +334,45 @@ class QwenMLXBackendTests(unittest.TestCase):
         self.assertEqual(model.icl_calls[0]["streaming_interval"], 0.25)
         self.assertEqual(model.icl_calls[0]["temperature"], 0.0)
 
+    def test_reference_audio_stream_yields_after_first_audible_chunk(self):
+        events = []
+
+        class FakeResult:
+            sample_rate = 24000
+
+            def __init__(self, audio):
+                self.audio = audio
+
+        class FakeConfig:
+            tts_model_type = "voice_design"
+
+        class FakeSpeechTokenizer:
+            has_encoder = True
+
+        class FakeModel:
+            sample_rate = 24000
+            config = FakeConfig()
+            speech_tokenizer = FakeSpeechTokenizer()
+
+            def _generate_icl(self, **kwargs):
+                events.append("icl:first")
+                yield FakeResult(np.full(12000, 0.1, dtype=np.float32))
+                events.append("icl:second")
+                yield FakeResult(np.full(12000, 0.1, dtype=np.float32))
+
+        backend = tts.QwenMLXBackend(
+            model=FakeModel(),
+            ref_audio=[0.3, 0.4],
+            ref_text="你好，我是固定音色。",
+            temperature=0.0,
+        )
+
+        stream = backend.stream_generate("你好")
+        first = next(stream)
+
+        self.assertEqual(first.shape[0], 12000)
+        self.assertEqual(events, ["icl:first"])
+
     def test_qwen_mode_description_reports_explicit_reference(self):
         class FakeConfig:
             tts_model_type = "voice_design"

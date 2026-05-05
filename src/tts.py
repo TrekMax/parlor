@@ -196,12 +196,16 @@ class QwenMLXBackend(TTSBackend):
 
     def stream_generate(self, text: str, voice: str | None = None, speed: float = 1.0):
         if self._uses_reference_generation():
-            results = list(self._generate_results(text=text, voice=voice, speed=speed, stream=True))
-            if self._should_retry_reference_results(results):
+            results = self._generate_results(text=text, voice=voice, speed=speed, stream=True)
+            yielded = False
+            for result in self._stream_reference_results(results):
+                yielded = True
+                yield np.array(result.audio)
+            if not yielded:
                 print("TTS: reference audio stream generated low-energy audio, falling back to voice instruction")
                 results = list(self._generate_without_reference(text=text, voice=voice, speed=speed, stream=True))
-            for result in results:
-                yield np.array(result.audio)
+                for result in results:
+                    yield np.array(result.audio)
             return
 
         for result in self._generate_results(text=text, voice=voice, speed=speed, stream=True):
@@ -233,6 +237,17 @@ class QwenMLXBackend(TTSBackend):
             and rms >= self.min_audio_rms
             and duration >= self.min_audio_seconds
         )
+
+    def _stream_reference_results(self, results):
+        buffered = []
+        for result in results:
+            buffered.append(result)
+            if not self._results_are_audible(buffered):
+                continue
+
+            yield from buffered
+            yield from results
+            return
 
     def _generate_results(
         self,
