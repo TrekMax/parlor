@@ -222,7 +222,7 @@ class QwenMLXBackendTests(unittest.TestCase):
 
             def _generate_icl(self, **kwargs):
                 self.icl_calls.append(kwargs)
-                yield FakeResult([0.0, 0.1])
+                yield FakeResult(np.full(12000, 0.1, dtype=np.float32))
 
         model = FakeModel()
         backend = tts.QwenMLXBackend(
@@ -251,7 +251,7 @@ class QwenMLXBackendTests(unittest.TestCase):
             sample_rate = 24000
 
             def __init__(self):
-                self.audio = [0.0, 0.1]
+                self.audio = np.full(12000, 0.1, dtype=np.float32)
 
         class FakeConfig:
             tts_model_type = "voice_design"
@@ -315,8 +315,8 @@ class QwenMLXBackendTests(unittest.TestCase):
 
             def _generate_icl(self, **kwargs):
                 self.icl_calls.append(kwargs)
-                yield FakeResult([0.0])
-                yield FakeResult([0.1])
+                yield FakeResult(np.full(6000, 0.1, dtype=np.float32))
+                yield FakeResult(np.full(6000, 0.1, dtype=np.float32))
 
         model = FakeModel()
         backend = tts.QwenMLXBackend(
@@ -432,6 +432,51 @@ class QwenMLXBackendTests(unittest.TestCase):
         self.assertEqual(model.icl_calls[0]["text"], "你好")
         self.assertEqual(model.calls[0]["instruct"], "年轻女性")
 
+    def test_reference_audio_low_energy_generation_falls_back_to_voice_instruct(self):
+        class FakeResult:
+            sample_rate = 24000
+
+            def __init__(self, audio):
+                self.audio = audio
+
+        class FakeConfig:
+            tts_model_type = "voice_design"
+
+        class FakeSpeechTokenizer:
+            has_encoder = True
+
+        class FakeModel:
+            sample_rate = 24000
+            config = FakeConfig()
+            speech_tokenizer = FakeSpeechTokenizer()
+
+            def __init__(self):
+                self.calls = []
+                self.icl_calls = []
+
+            def _generate_icl(self, **kwargs):
+                self.icl_calls.append(kwargs)
+                yield FakeResult([0.001, -0.001])
+
+            def generate(self, **kwargs):
+                self.calls.append(kwargs)
+                yield FakeResult([0.2, 0.3])
+
+        model = FakeModel()
+        backend = tts.QwenMLXBackend(
+            model=model,
+            ref_audio=[0.3, 0.4],
+            ref_text="你好，我是固定音色。",
+            voice_instruct="年轻女性",
+            temperature=0.0,
+        )
+
+        pcm = backend.generate("你好啊。")
+
+        self.assertEqual(len(pcm), 2)
+        self.assertEqual(model.icl_calls[0]["text"], "你好啊。")
+        self.assertEqual(model.calls[0]["instruct"], "年轻女性")
+
     def test_reference_audio_empty_stream_falls_back_to_voice_instruct(self):
         class FakeResult:
             sample_rate = 24000
@@ -473,6 +518,51 @@ class QwenMLXBackendTests(unittest.TestCase):
         )
 
         chunks = list(backend.stream_generate("你好"))
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(model.icl_calls[0]["stream"], True)
+        self.assertEqual(model.calls[0]["instruct"], "年轻女性")
+
+    def test_reference_audio_low_energy_stream_falls_back_to_voice_instruct(self):
+        class FakeResult:
+            sample_rate = 24000
+
+            def __init__(self, audio):
+                self.audio = audio
+
+        class FakeConfig:
+            tts_model_type = "voice_design"
+
+        class FakeSpeechTokenizer:
+            has_encoder = True
+
+        class FakeModel:
+            sample_rate = 24000
+            config = FakeConfig()
+            speech_tokenizer = FakeSpeechTokenizer()
+
+            def __init__(self):
+                self.calls = []
+                self.icl_calls = []
+
+            def _generate_icl(self, **kwargs):
+                self.icl_calls.append(kwargs)
+                yield FakeResult([0.001, -0.001])
+
+            def generate(self, **kwargs):
+                self.calls.append(kwargs)
+                yield FakeResult([0.2, 0.3])
+
+        model = FakeModel()
+        backend = tts.QwenMLXBackend(
+            model=model,
+            ref_audio=[0.3, 0.4],
+            ref_text="你好，我是固定音色。",
+            voice_instruct="年轻女性",
+            temperature=0.0,
+        )
+
+        chunks = list(backend.stream_generate("你好啊。"))
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual(model.icl_calls[0]["stream"], True)

@@ -19,6 +19,9 @@ DEFAULT_QWEN_STREAMING_INTERVAL = 0.5
 DEFAULT_QWEN_REF_AUDIO_TRIM_THRESHOLD = 0.006
 DEFAULT_QWEN_REF_AUDIO_TARGET_PEAK = 0.9
 DEFAULT_QWEN_REF_AUDIO_MIN_PEAK = 0.2
+DEFAULT_QWEN_MIN_AUDIO_PEAK = 0.03
+DEFAULT_QWEN_MIN_AUDIO_RMS = 0.005
+DEFAULT_QWEN_MIN_AUDIO_SECONDS = 0.25
 
 
 def _is_apple_silicon() -> bool:
@@ -163,6 +166,9 @@ class QwenMLXBackend(TTSBackend):
         self.ref_audio_min_peak = float(
             os.environ.get("TTS_REF_AUDIO_MIN_PEAK", DEFAULT_QWEN_REF_AUDIO_MIN_PEAK)
         )
+        self.min_audio_peak = float(os.environ.get("TTS_MIN_AUDIO_PEAK", DEFAULT_QWEN_MIN_AUDIO_PEAK))
+        self.min_audio_rms = float(os.environ.get("TTS_MIN_AUDIO_RMS", DEFAULT_QWEN_MIN_AUDIO_RMS))
+        self.min_audio_seconds = float(os.environ.get("TTS_MIN_AUDIO_SECONDS", DEFAULT_QWEN_MIN_AUDIO_SECONDS))
         self._locked_ref_audio = None
         self._validate_reference_config(validate_paths=model is None)
         if model is not None:
@@ -181,22 +187,52 @@ class QwenMLXBackend(TTSBackend):
 
     def generate(self, text: str, voice: str | None = None, speed: float = 1.0) -> np.ndarray:
         results = list(self._generate_results(text=text, voice=voice, speed=speed))
-        if not results and self.ref_audio and self.ref_text:
-            print("TTS: reference audio generated no audio, falling back to voice instruction")
+        if self._should_retry_reference_results(results):
+            print("TTS: reference audio generated low-energy audio, falling back to voice instruction")
             results = list(self._generate_without_reference(text=text, voice=voice, speed=speed, stream=False))
         if not results:
             raise RuntimeError("Qwen3 TTS generated no audio")
         return np.concatenate([np.array(r.audio) for r in results])
 
     def stream_generate(self, text: str, voice: str | None = None, speed: float = 1.0):
-        yielded = False
-        for result in self._generate_results(text=text, voice=voice, speed=speed, stream=True):
-            yielded = True
-            yield np.array(result.audio)
-        if not yielded and self.ref_audio and self.ref_text:
-            print("TTS: reference audio stream generated no audio, falling back to voice instruction")
-            for result in self._generate_without_reference(text=text, voice=voice, speed=speed, stream=False):
+        if self._uses_reference_generation():
+            results = list(self._generate_results(text=text, voice=voice, speed=speed, stream=True))
+            if self._should_retry_reference_results(results):
+                print("TTS: reference audio stream generated low-energy audio, falling back to voice instruction")
+                results = list(self._generate_without_reference(text=text, voice=voice, speed=speed, stream=True))
+            for result in results:
                 yield np.array(result.audio)
+            return
+
+        for result in self._generate_results(text=text, voice=voice, speed=speed, stream=True):
+            yield np.array(result.audio)
+
+    def _uses_reference_generation(self) -> bool:
+        return bool(self.ref_audio and self.ref_text) or self._can_use_voice_lock()
+
+    def _should_retry_reference_results(self, results) -> bool:
+        if not self._uses_reference_generation():
+            return False
+        return not self._results_are_audible(results)
+
+    def _results_are_audible(self, results) -> bool:
+        if not results:
+            return False
+
+        chunks = [np.asarray(result.audio, dtype=np.float32).reshape(-1) for result in results]
+        chunks = [chunk for chunk in chunks if chunk.size]
+        if not chunks:
+            return False
+
+        audio = np.concatenate(chunks)
+        peak = float(np.max(np.abs(audio)))
+        rms = float(np.sqrt(np.mean(audio * audio)))
+        duration = audio.size / max(self.sample_rate, 1)
+        return (
+            peak >= self.min_audio_peak
+            and rms >= self.min_audio_rms
+            and duration >= self.min_audio_seconds
+        )
 
     def _generate_results(
         self,
