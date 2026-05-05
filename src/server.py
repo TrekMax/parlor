@@ -22,13 +22,11 @@ MODEL_PATH = model_config.resolve_model_path()
 SYSTEM_PROMPT = (
     "你是一个友好、善于交谈的AI助手。用户正在通过麦克风与你对话（用户可能会多种语言穿插对话），并且正在用摄像头给你展示画面。\n\n"
     "你**必须始终只使用 respond_to_user 工具**来回复用户。\n\n"
+    "当用户消息包含音频时，请根据音频内容转述用户说的话并回复；当消息同时包含图像时，只有在和用户问题相关时才结合画面。\n\n"
     "请按以下两步执行：\n"
     "1. 首先，逐字转述用户说的话\n"
     "2. 然后，写出你的回答\n\n"
 )
-TASK_PROMPT_AUDIO_IMAGE = "用户刚刚通过语音与你说话，同时正在用摄像头给你展示画面。请回复用户说的内容；如果画面相关，可以结合你看到的内容。"
-TASK_PROMPT_AUDIO = "用户刚刚通过语音与你说话。请回复用户说的内容。"
-TASK_PROMPT_IMAGE = "用户正在通过摄像头给你展示画面。请描述你看到的内容。"
 
 engine = None
 tts_backend = None
@@ -135,13 +133,7 @@ async def websocket_endpoint(ws: WebSocket):
             if msg.get("image"):
                 content.append({"type": "image", "blob": msg["image"]})
 
-            if msg.get("audio") and msg.get("image"):
-                content.append({"type": "text", "text": TASK_PROMPT_AUDIO_IMAGE})
-            elif msg.get("audio"):
-                content.append({"type": "text", "text": TASK_PROMPT_AUDIO})
-            elif msg.get("image"):
-                content.append({"type": "text", "text": TASK_PROMPT_IMAGE})
-            else:
+            if not msg.get("audio") and not msg.get("image"):
                 content.append({"type": "text", "text": msg.get("text", "Hello!")})
 
             # LLM inference
