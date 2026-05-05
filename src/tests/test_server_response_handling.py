@@ -29,6 +29,11 @@ class ResponseHandlingTests(unittest.TestCase):
 
         self.assertEqual(sentences, ["你好。", "我可以帮你吗？", "可以的！"])
 
+    def test_tts_sentences_do_not_split_decimal_numbers(self):
+        sentences = response_utils.sentences_for_tts("版本是 3.14。可以继续。")
+
+        self.assertEqual(sentences, ["版本是 3.14。", "可以继续。"])
+
     def test_does_not_stream_tts_for_non_tool_fallback(self):
         self.assertFalse(response_utils.should_stream_tts(used_tool=False, text=response_utils.FALLBACK_RESPONSE))
 

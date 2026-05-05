@@ -2,7 +2,7 @@
 
 import re
 
-SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?。！？])\s*')
+SENTENCE_SPLIT_RE = re.compile(r'(?<=[。！？])\s*|(?<=[.!?])\s+')
 MODEL_DELIMITER = '<|"|>'
 FALLBACK_RESPONSE = "I didn't catch that. Could you say it again?"
 
