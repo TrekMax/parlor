@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 INDEX_HTML = Path(__file__).resolve().parent.parent / "index.html"
+PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
 
 class FrontendSafetyTests(unittest.TestCase):
@@ -26,6 +27,11 @@ class FrontendSafetyTests(unittest.TestCase):
         self.assertIn("const LISTENING_VAD_THRESHOLD = 0.35;", html)
         self.assertIn("positiveSpeechThreshold: LISTENING_VAD_THRESHOLD", html)
         self.assertIn("newState === 'speaking' ? SPEAKING_VAD_THRESHOLD : LISTENING_VAD_THRESHOLD", html)
+
+    def test_kokoro_fallback_dependency_is_available_on_darwin(self):
+        pyproject = PYPROJECT.read_text()
+
+        self.assertIn('"kokoro-onnx>=0.5.0"', pyproject)
 
 
 if __name__ == "__main__":
