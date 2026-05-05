@@ -27,7 +27,8 @@ class ServerLifecycleTests(unittest.TestCase):
         source = SERVER_PY.read_text()
 
         self.assertIn("tools=[respond_to_user]", source)
-        self.assertIn("answer_lookup_request(transcription)", source)
+        self.assertIn("lookup_request_context(transcription)", source)
+        self.assertIn("用自然、温暖、口语化的方式回复用户", source)
         self.assertNotIn("tools=[respond_to_user, assistant_tools", source)
 
 

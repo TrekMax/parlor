@@ -100,8 +100,8 @@ def get_weather(location: str | None = None) -> str:
     )
 
 
-def answer_lookup_request(transcription: str | None) -> str | None:
-    """Answer deterministic time/weather requests after the model transcribes speech."""
+def lookup_request_context(transcription: str | None) -> str | None:
+    """Return deterministic time/weather facts for the model to phrase naturally."""
     text = (transcription or "").strip()
     if not text:
         return None
@@ -110,7 +110,7 @@ def answer_lookup_request(transcription: str | None) -> str | None:
         return get_weather(_extract_weather_location(text))
 
     if _is_time_request(text):
-        return f"现在时间是 {get_current_time(_extract_timezone(text))}。"
+        return get_current_time(_extract_timezone(text))
 
     return None
 

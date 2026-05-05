@@ -84,11 +84,11 @@ class AssistantToolsTests(unittest.TestCase):
         self.assertIn("没有找到地点", result)
 
     def test_lookup_request_ignores_normal_conversation(self):
-        self.assertIsNone(assistant_tools.answer_lookup_request("你好"))
+        self.assertIsNone(assistant_tools.lookup_request_context("你好"))
 
     def test_lookup_request_extracts_chinese_weather_location(self):
         with patch("assistant_tools.get_weather", return_value="上海 当前天气：晴") as get_weather:
-            result = assistant_tools.answer_lookup_request("上海天气怎么样？")
+            result = assistant_tools.lookup_request_context("上海天气怎么样？")
 
         self.assertEqual(result, "上海 当前天气：晴")
         get_weather.assert_called_once_with("上海")
@@ -96,16 +96,16 @@ class AssistantToolsTests(unittest.TestCase):
     def test_lookup_request_uses_default_location_for_weather_without_city(self):
         with patch.dict("os.environ", {"WEATHER_DEFAULT_LOCATION": "上海"}):
             with patch("assistant_tools.get_weather", return_value="上海 当前天气：晴") as get_weather:
-                result = assistant_tools.answer_lookup_request("今天天气怎么样？")
+                result = assistant_tools.lookup_request_context("今天天气怎么样？")
 
         self.assertEqual(result, "上海 当前天气：晴")
         get_weather.assert_called_once_with("上海")
 
     def test_lookup_request_answers_time(self):
         with patch("assistant_tools.get_current_time", return_value="2026-05-05 12:30:00 CST") as get_time:
-            result = assistant_tools.answer_lookup_request("现在几点？")
+            result = assistant_tools.lookup_request_context("现在几点？")
 
-        self.assertEqual(result, "现在时间是 2026-05-05 12:30:00 CST。")
+        self.assertEqual(result, "2026-05-05 12:30:00 CST")
         get_time.assert_called_once()
 
 

@@ -173,9 +173,29 @@ async def websocket_endpoint(ws: WebSocket):
                     .strip()
                 )
                 text_response = response_utils.normalize_response_text(tool_result.get("response", ""))
-                lookup_response = assistant_tools.answer_lookup_request(transcription)
-                if lookup_response:
-                    text_response = lookup_response
+                lookup_context = assistant_tools.lookup_request_context(transcription)
+                if lookup_context:
+                    tool_result.clear()
+                    response = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: conversation.send_message({
+                            "role": "user",
+                            "content": (
+                                "请基于以下实时查询结果，用自然、温暖、口语化的方式回复用户。"
+                                "不要机械罗列全部字段，只保留用户最关心的信息，并给一句贴心建议。"
+                                f"\n用户原话：{transcription}"
+                                f"\n实时查询结果：{lookup_context}"
+                                f"\n你刚才的草稿回复：{text_response}"
+                            ),
+                        }),
+                    )
+                    llm_time = time.time() - t0
+                    if tool_result:
+                        text_response = response_utils.normalize_response_text(tool_result.get("response", ""))
+                        used_tool = True
+                    else:
+                        text_response = response_utils.extract_raw_response_text(response)
+                        used_tool = False
                 print(f"LLM ({llm_time:.2f}s) [tool] heard: {transcription!r} → {text_response}")
             else:
                 transcription = None
