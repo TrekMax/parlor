@@ -31,6 +31,7 @@ SYSTEM_PROMPT = (
 engine = None
 tts_backend = None
 tts_generation_lock = asyncio.Lock()
+active_session_lock = asyncio.Lock()
 
 
 def load_models():
@@ -76,6 +77,22 @@ async def root():
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
+
+    if active_session_lock.locked():
+        await ws.send_text(json.dumps({
+            "type": "text",
+            "text": "当前已有一个语音会话在运行，请关闭其它页面或等待当前会话结束后再试。",
+            "llm_time": 0,
+        }))
+        await ws.send_text(json.dumps({
+            "type": "audio_end",
+            "tts_time": 0,
+            "skipped": True,
+        }))
+        await ws.close(code=1013)
+        return
+
+    await active_session_lock.acquire()
 
     # Per-connection tool state captured via closure
     tool_result = {}
@@ -240,6 +257,7 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         recv_task.cancel()
         conversation.__exit__(None, None, None)
+        active_session_lock.release()
 
 
 if __name__ == "__main__":

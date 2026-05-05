@@ -31,6 +31,15 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertIn("用自然、温暖、口语化的方式回复用户", source)
         self.assertNotIn("tools=[respond_to_user, assistant_tools", source)
 
+    def test_websocket_rejects_second_active_session_before_creating_conversation(self):
+        source = SERVER_PY.read_text()
+
+        self.assertIn("active_session_lock = asyncio.Lock()", source)
+        self.assertIn("if active_session_lock.locked():", source)
+        self.assertIn("await ws.close(code=1013)", source)
+        self.assertIn("await active_session_lock.acquire()", source)
+        self.assertIn("active_session_lock.release()", source)
+
 
 if __name__ == "__main__":
     unittest.main()
