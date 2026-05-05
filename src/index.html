@@ -442,6 +442,7 @@
   <!-- Controls -->
   <div class="controls">
     <button id="cameraToggle" class="ctrl-btn active">Camera On</button>
+    <button id="audioToggle" class="ctrl-btn">Enable Audio</button>
     <div class="state-indicator">
       <div id="stateDot" class="dot loading"></div>
       <span id="stateText">Loading...</span>
@@ -457,7 +458,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const video = $('video'), cameraToggle = $('cameraToggle');
+const video = $('video'), cameraToggle = $('cameraToggle'), audioToggle = $('audioToggle');
 const messagesDiv = $('messages'), statusEl = $('status');
 const stateDot = $('stateDot'), stateText = $('stateText');
 const viewportWrap = $('viewportWrap');
@@ -775,13 +776,33 @@ function ensureAudioCtx() {
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.75;
+    audioCtx.onstatechange = updateAudioToggle;
   }
+}
+
+function updateAudioToggle() {
+  const enabled = audioCtx && audioCtx.state === 'running';
+  audioToggle.classList.toggle('active', enabled);
+  audioToggle.textContent = enabled ? 'Audio On' : 'Enable Audio';
+}
+
+async function resumeAudioContext() {
+  ensureAudioCtx();
+  if (audioCtx.state === 'suspended') {
+    try {
+      await audioCtx.resume();
+    } catch (e) {
+      console.warn('Audio resume failed:', e.message);
+    }
+  }
+  updateAudioToggle();
+  return audioCtx.state === 'running';
 }
 
 function startStreamPlayback() {
   stopPlayback();
   ensureAudioCtx();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  resumeAudioContext();
   streamNextTime = audioCtx.currentTime + 0.05; // Small initial buffer
   ttsStreamActive = true;
   assistantAudioActive = true;
@@ -858,6 +879,10 @@ cameraToggle.addEventListener('click', () => {
   video.style.opacity = cameraEnabled ? 1 : 0.3;
 });
 
+audioToggle.addEventListener('click', () => {
+  resumeAudioContext();
+});
+
 // ── Init ──
 async function init() {
   initWaveformCanvas();
@@ -886,15 +911,19 @@ async function init() {
   // Init audio context on first user gesture for mic visualizer
   // (browsers require user interaction to create AudioContext)
   const initAudio = () => {
-    ensureAudioCtx();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    resumeAudioContext();
     document.removeEventListener('click', initAudio);
     document.removeEventListener('keydown', initAudio);
+    document.removeEventListener('pointerdown', initAudio);
+    document.removeEventListener('touchstart', initAudio);
   };
   document.addEventListener('click', initAudio);
   document.addEventListener('keydown', initAudio);
+  document.addEventListener('pointerdown', initAudio);
+  document.addEventListener('touchstart', initAudio);
   // Also try immediately (may work if page had prior interaction)
   ensureAudioCtx();
+  updateAudioToggle();
 
   setState('listening');
 

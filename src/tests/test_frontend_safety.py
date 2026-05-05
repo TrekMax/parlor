@@ -33,6 +33,15 @@ class FrontendSafetyTests(unittest.TestCase):
 
         self.assertIn('"kokoro-onnx>=0.5.0"', pyproject)
 
+    def test_tts_playback_has_audio_context_unlock_path(self):
+        html = INDEX_HTML.read_text()
+
+        self.assertIn('id="audioToggle"', html)
+        self.assertIn("async function resumeAudioContext()", html)
+        self.assertIn("resumeAudioContext();", html)
+        self.assertIn("document.addEventListener('pointerdown', initAudio", html)
+        self.assertIn("document.addEventListener('touchstart', initAudio", html)
+
 
 if __name__ == "__main__":
     unittest.main()
