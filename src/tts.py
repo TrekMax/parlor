@@ -16,10 +16,51 @@ DEFAULT_QWEN_VOICE_LOCK_TEXT = "你好，我是你的语音助手，声音清晰
 DEFAULT_QWEN_VOICE_LOCK_MAX_TOKENS = 768
 DEFAULT_QWEN_TEMPERATURE = 0.0
 DEFAULT_QWEN_STREAMING_INTERVAL = 0.5
+DEFAULT_QWEN_REF_AUDIO_TRIM_THRESHOLD = 0.006
+DEFAULT_QWEN_REF_AUDIO_TARGET_PEAK = 0.9
+DEFAULT_QWEN_REF_AUDIO_MIN_PEAK = 0.2
 
 
 def _is_apple_silicon() -> bool:
     return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def _preprocess_qwen_reference_audio(
+    audio,
+    sample_rate: int,
+    trim_threshold: float = DEFAULT_QWEN_REF_AUDIO_TRIM_THRESHOLD,
+    target_peak: float = DEFAULT_QWEN_REF_AUDIO_TARGET_PEAK,
+    min_peak: float = DEFAULT_QWEN_REF_AUDIO_MIN_PEAK,
+    trim_margin_seconds: float = 0.2,
+) -> np.ndarray:
+    """Trim low-energy edges and normalize quiet reference audio for Qwen3 ICL."""
+    pcm = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if pcm.size == 0:
+        return pcm
+
+    pcm = np.nan_to_num(pcm, copy=False)
+    if trim_threshold > 0 and sample_rate > 0:
+        window = max(1, int(sample_rate * 0.1))
+        step = max(1, window // 4)
+        if pcm.size >= window:
+            rms_values = []
+            for start in range(0, pcm.size - window + 1, step):
+                frame = pcm[start : start + window]
+                rms_values.append(float(np.sqrt(np.mean(frame * frame))))
+
+            speech_frames = np.flatnonzero(np.asarray(rms_values) >= trim_threshold)
+            if speech_frames.size:
+                margin = int(sample_rate * trim_margin_seconds)
+                start = max(0, int(speech_frames[0]) * step - margin)
+                end = min(pcm.size, int(speech_frames[-1]) * step + window + margin)
+                if end > start:
+                    pcm = pcm[start:end]
+
+    peak = float(np.max(np.abs(pcm))) if pcm.size else 0.0
+    if 0 < peak < min_peak and target_peak > 0:
+        pcm = np.clip(pcm * (target_peak / peak), -1.0, 1.0)
+
+    return pcm.astype(np.float32, copy=False)
 
 
 class TTSBackend:
@@ -109,6 +150,18 @@ class QwenMLXBackend(TTSBackend):
             streaming_interval
             if streaming_interval is not None
             else float(os.environ.get("TTS_STREAMING_INTERVAL", DEFAULT_QWEN_STREAMING_INTERVAL))
+        )
+        self.ref_audio_preprocess = (
+            os.environ.get("TTS_REF_AUDIO_PREPROCESS", "1").lower() not in {"0", "false", "no"}
+        )
+        self.ref_audio_trim_threshold = float(
+            os.environ.get("TTS_REF_AUDIO_TRIM_THRESHOLD", DEFAULT_QWEN_REF_AUDIO_TRIM_THRESHOLD)
+        )
+        self.ref_audio_target_peak = float(
+            os.environ.get("TTS_REF_AUDIO_TARGET_PEAK", DEFAULT_QWEN_REF_AUDIO_TARGET_PEAK)
+        )
+        self.ref_audio_min_peak = float(
+            os.environ.get("TTS_REF_AUDIO_MIN_PEAK", DEFAULT_QWEN_REF_AUDIO_MIN_PEAK)
         )
         self._locked_ref_audio = None
         self._validate_reference_config(validate_paths=model is None)
@@ -321,7 +374,20 @@ class QwenMLXBackend(TTSBackend):
         if isinstance(ref_audio, (str, Path)):
             from mlx_audio.utils import load_audio
 
-            return load_audio(ref_audio, sample_rate=self.sample_rate)
+            audio = load_audio(ref_audio, sample_rate=self.sample_rate)
+            if not self.ref_audio_preprocess:
+                return audio
+
+            processed = _preprocess_qwen_reference_audio(
+                audio,
+                sample_rate=self.sample_rate,
+                trim_threshold=self.ref_audio_trim_threshold,
+                target_peak=self.ref_audio_target_peak,
+                min_peak=self.ref_audio_min_peak,
+            )
+            import mlx.core as mx
+
+            return mx.array(processed)
         return ref_audio
 
     def _validate_reference_config(self, validate_paths: bool):

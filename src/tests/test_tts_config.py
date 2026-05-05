@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 import tts
 
 
@@ -66,6 +68,28 @@ class TTSConfigTests(unittest.TestCase):
 
 
 class QwenMLXBackendTests(unittest.TestCase):
+    def test_reference_audio_preprocess_trims_and_normalizes_quiet_audio(self):
+        speech = np.full(24000, 0.05, dtype=np.float32)
+        audio = np.concatenate(
+            [
+                np.zeros(4800, dtype=np.float32),
+                speech,
+                np.zeros(4800, dtype=np.float32),
+            ]
+        )
+
+        processed = tts._preprocess_qwen_reference_audio(
+            audio,
+            sample_rate=24000,
+            trim_threshold=0.01,
+            target_peak=0.9,
+            min_peak=0.2,
+            trim_margin_seconds=0.05,
+        )
+
+        self.assertLess(processed.shape[0], audio.shape[0])
+        self.assertAlmostEqual(float(np.max(np.abs(processed))), 0.9, places=4)
+
     def test_reference_audio_requires_reference_text(self):
         class FakeModel:
             sample_rate = 24000
